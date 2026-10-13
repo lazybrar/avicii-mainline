@@ -1,0 +1,64 @@
+b09dfae2a dt-bindings: arm: qcom,ids: Add SoC ID for SM7250
+fc2e6eb59 soc: qcom: socinfo: Add SM7250 SoC ID
+57e0c5e7b dt-bindings: clock: Add SM7250 global clock controller
+dedc57541 clk: qcom: Add Global Clock Controller (GCC) driver for SM7250
+4c5ee4f9b dt-bindings: clock: qcom,rpmhcc: Document RPMHCC compatible for SM7250
+1c3862f52 clk: qcom: rpmh: Add SM7250 rpmh clocks
+3e340934c dt-bindings: power: qcom,rpmhpd: Document RPMh power domain for SM7250
+81f676196 pmdomain: qcom: rpmhpd: Add RPMh power domains for SM7250
+ccd733f17 dt-bindings: firmware: qcom,scm: Document SM7250 SCM
+9077972f2 dt-bindings: interrupt-controller: qcom,pdc: Document SM7250 PDC
+82ad373bb dt-bindings: cpufreq: qcom-hw: Document SM7250 cpufreq hardware
+e94936082 arm64: dts: qcom: Add SM7250 devicetree file
+45132b197 pinctrl: qcom: add SM7250 TLMM driver
+d98c911c5 arm64: dts: qcom: add OnePlus Nord (avicii), USB and reserved-memory fixes for SM7250
+00162aad0 arm64: dts: qcom: sm7250: add apps SMMU and APSS watchdog
+8936657bc arm64: dts: qcom: sm7250: add TLMM pin controller and debug UART pinctrl
+438572ab3 phy: qcom-qmp-ufs: add SM7250 support
+4100da1ec scsi: ufs: qcom: support device reset via TLMM pinctrl states
+9377f60e9 dt-bindings: pinctrl: qcom,sm7250-tlmm: fix tile addresses in example
+91f27436b arm64: dts: qcom: sm7250: add UFS host controller and PHY
+b38c531a6 arm64: dts: qcom: sm7250-oneplus-avicii: enable UFS and add PM8150/PM8150L regulators
+215b0390b arm64: dts: qcom: sm7250-oneplus-avicii: add PM8150 PON with reboot-mode
+b8a9bef8e arm64: dts: qcom: sm7250-oneplus-avicii: reserve TZ-owned GPIOs
+5860eeaed ufs: qcom: limit SM7250 to 32-bit DMA; avicii: keep boot rails always-on
+4ecb59f94 arm64: dts: qcom: sm7250: add TSENS and thermal zones with cpufreq cooling
+4c66fb267 arm64: dts: qcom: sm7250-oneplus-avicii: add PM8150L, PM7250B, power and volume keys
+319a90da5 arm64: dts: qcom: sm7250: add QUP wrappers with iommus, i2c11 and the bq27541 gauge
+14dfb6dbb clk: qcom: Add SM7250 display clock controller
+7d61d51d5 drm/msm/dpu: Add SM7250 (DPU 6.1.0) catalog, mdss and UBWC data
+b510696f3 arm64: dts: qcom: sm7250: add display pipeline and enable the avicii panel
+1d210827b drm/panel: Add Samsung AMS644VK04 DSC command mode panel driver
+f09c1fa78 remoteproc/soc/mailbox: add SM7250 MPSS PAS, pd-mapper and IPCC compatibles
+b8d5867d6 arm64: dts: qcom: sm7250: add IPCC, AOSS QMP, modem SMP2P, MPSS and WCN3990 Wi-Fi
+992a39f47 arm64: dts: qcom: sm7250-oneplus-avicii: enable modem and Wi-Fi
+89cfd6696 power: supply: Add Qualcomm PM7250B charger status and charge inhibit driver
+b9a502c11 arm64: dts: qcom: pm7250b, sm7250-oneplus-avicii: Add charger node
+359e9e678 arm64: dts: qcom: sm7250-oneplus-avicii: restore closing brace lost in merge
+71ffe76ba arm64: dts: qcom: sm7250-oneplus-avicii: restore wifi status lost in merge
+325fc6840 pmdomain: rpmhpd: add QPHY for SM7250 and let the UFS PHY hold it
+b0b0af3b5 HACK: net: qrtr: ns: retry announcing local servers after a remote HELLO
+2e65c451b arm64: dts: qcom: sm7250-oneplus-avicii: enable USB-C OTG with the PM7250B type-C port
+d702e0ffe power: supply: qcom_pm7250b_charger: add charge control start/end thresholds
+eaa6e8e5e arm64: dts: qcom: sm7250-oneplus-avicii: fix battery gauge compatible, link it to the charger
+465016e77 clk: qcom: add SM7250 graphics clock controller driver
+0fb2ca891 drm/msm/adreno: add Adreno 620 (0x06020000) catalog entry
+6923ea036 arm64: dts: qcom: sm7250: add GPU, GMU, GPU clock controller and GPU SMMU
+3e1b47a87 Input: add Goodix GT9886 touchscreen driver
+67713f9e2 arm64: dts: qcom: sm7250: add GPI DMA and QUP wrapper 1 SE1 I2C
+240a61aff arm64: dts: qcom: sm7250-oneplus-avicii: add the Goodix GT9886 touchscreen
+58719c867 Input: goodix_gt9886: ack every frame
+6720d3431 drm/msm/a6xx: add the a620 bandwidth table for the GMU
+625432b0a arm64: dts: qcom: sm7250: align the GPU zap shader region to 4 KiB
+bc228bb87 drm/msm/a6xx: program the PDC sequencer on a620
+c2addd5f8 iommu/arm-smmu-qcom: skip PRR setup on the SM7250 GPU SMMU
+82615cdd2 Input: goodix_gt9886: drop contacts outside the panel
+593304186 dt-bindings: remoteproc: qcom,sm6350-pas: Add SM7250 ADSP
+0d96ce00c remoteproc: qcom: pas: Add SM7250 ADSP support
+cf92dde48 arm64: dts: qcom: sm7250: Add ADSP remoteproc with APR services and QUP I2C9
+3a6c9ab13 arm64: dts: qcom: sm7250-oneplus-avicii: Enable ADSP and the speaker amplifier I2C bus
+e35fe1081 ASoC: dt-bindings: Add NXP/Goodix TFA9874 amplifier
+7072cae15 ASoC: codecs: Add NXP/Goodix TFA9874 amplifier driver
+8b493cd7b arm64: dts: qcom: sm7250-oneplus-avicii: Add speaker playback via Primary MI2S
+4a53ccbba arm64: dts: qcom: sm7250: Add ADSP FastRPC node
+ccfe04c9c dt-bindings: use a public contact address for the new SM7250 bindings

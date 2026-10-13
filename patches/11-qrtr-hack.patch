@@ -1,0 +1,56 @@
+Subject: HACK: net: qrtr: ns: retry announcing local servers
+
+Combined diff of the following commits (base v7.3-rc7):
+
+  - HACK: net: qrtr: ns: retry announcing local servers after a remote HELLO
+
+---
+ net/qrtr/ns.c | 22 ++++++++++++++++++++--
+ 1 file changed, 20 insertions(+), 2 deletions(-)
+
+diff --git a/net/qrtr/ns.c b/net/qrtr/ns.c
+index bcb090ee7..54938caf2 100644
+--- a/net/qrtr/ns.c
++++ b/net/qrtr/ns.c
+@@ -5,6 +5,7 @@
+  * Copyright (c) 2020, Linaro Ltd.
+  */
+ 
++#include <linux/delay.h>
+ #include <linux/module.h>
+ #include <linux/qrtr.h>
+ #include <linux/workqueue.h>
+@@ -226,14 +227,31 @@ static int announce_servers(struct sockaddr_qrtr *sq)
+ 
+ 	/* Announce the list of servers registered in this node */
+ 	xa_for_each(&node->servers, index, srv) {
+-		ret = service_announce_new(sq, srv);
++		int tries = 0;
++
++		/*
++		 * The SM7250 modem rejects sends on the IPCRTR channel for a
++		 * short while after its HELLO. Giving up here leaves it
++		 * ignorant of every service registered before it booted
++		 * (pd-mapper, rmtfs, tftp), so retry for a few seconds.
++		 */
++		do {
++			ret = service_announce_new(sq, srv);
++			if (ret >= 0 || ret == -ENODEV)
++				break;
++			msleep(100);
++		} while (++tries < 30);
++
+ 		if (ret < 0) {
+ 			if (ret == -ENODEV)
+ 				continue;
+ 
+-			pr_err("failed to announce new service\n");
++			pr_err("failed to announce new service: %d\n", ret);
+ 			return ret;
+ 		}
++		if (tries)
++			pr_info("qrtr: announced service %u after %d retries\n",
++				srv->service, tries);
+ 	}
+ 	return 0;
+ }

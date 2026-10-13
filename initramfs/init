@@ -1,0 +1,142 @@
+#!/bin/sh
+# Test initramfs for avicii: USB network (NCM) + serial (ACM) gadget, telnet shell.
+# Phone is 172.16.42.1, host gets 172.16.42.2 via DHCP.  telnet 172.16.42.1
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs dev /dev
+mkdir -p /dev/pts /run /tmp
+mount -t devpts devpts /dev/pts
+mount -t tmpfs tmpfs /run
+mount -t tmpfs tmpfs /tmp
+mount -t configfs configfs /sys/kernel/config
+
+# Mainline boots with watchdog.handle_boot_enabled=0: the kernel does not service the hardware
+# watchdog, so a kernel stuck before init bites after 30 s and lands in Crashdump Mode with the
+# log still in RAM. From here on userspace has to feed it.
+[ -c /dev/watchdog0 ] && watchdog -t 5 -T 30 /dev/watchdog0
+
+# console log of the previous boot (any kernel that logs to the same ramoops zone)
+mount -t pstore pstore /sys/fs/pstore 2>/dev/null
+mkdir -p /run/prev-boot
+cp /sys/fs/pstore/* /run/prev-boot/ 2>/dev/null
+
+hostname avicii
+echo 1 > /proc/sys/kernel/sysrq 2>/dev/null
+
+# --- USB gadget ---
+G=/sys/kernel/config/usb_gadget/g1
+mkdir -p $G
+echo 0x1d6b > $G/idVendor
+echo 0x0104 > $G/idProduct
+mkdir -p $G/strings/0x409
+echo avicii-linux > $G/strings/0x409/serialnumber
+echo OnePlus > $G/strings/0x409/manufacturer
+echo "Nord Linux" > $G/strings/0x409/product
+mkdir -p $G/configs/c.1/strings/0x409
+echo "ncm+acm" > $G/configs/c.1/strings/0x409/configuration
+mkdir -p $G/functions/ncm.usb0
+# fixed MACs: with random ones the PC shows up as a new DHCP client on every boot
+echo 02:6e:6f:72:64:01 > $G/functions/ncm.usb0/host_addr
+echo 02:6e:6f:72:64:02 > $G/functions/ncm.usb0/dev_addr
+ln -s $G/functions/ncm.usb0 $G/configs/c.1/
+mkdir -p $G/functions/acm.GS0 && ln -s $G/functions/acm.GS0 $G/configs/c.1/
+
+# the UDC can show up late on the downstream dwc3-msm glue
+i=0
+while [ $i -lt 30 ]; do
+	UDC=$(ls /sys/class/udc 2>/dev/null | head -n1)
+	[ -n "$UDC" ] && break
+	sleep 1; i=$((i + 1))
+done
+echo "udc: ${UDC:-none}" > /dev/kmsg
+[ -n "$UDC" ] && echo "$UDC" > $G/UDC
+
+ifconfig lo 127.0.0.1 up
+i=0
+while [ $i -lt 10 ] && ! ifconfig usb0 >/dev/null 2>&1; do sleep 1; i=$((i + 1)); done
+ifconfig usb0 172.16.42.1 netmask 255.255.255.0 up
+
+# --- hand over to the installed system ---
+# With nord.boot=debian on the kernel command line, mount the root filesystem (ext4 labelled
+# "nordroot" on userdata) and switch to it. The USB gadget and usb0 set up above are kernel
+# state and survive the switch; Debian's networkd takes over the address and DHCP server.
+# Anything going wrong falls through to the initramfs shell services below.
+if grep -qw nord.boot=debian /proc/cmdline; then
+	i=0
+	while [ $i -lt 15 ]; do
+		rootdev=$(findfs LABEL=nordroot 2>/dev/null) && break
+		sleep 1; i=$((i + 1))
+	done
+	mkdir -p /newroot
+	if [ -n "$rootdev" ] && mount -t ext4 -o noatime "$rootdev" /newroot && [ -x /newroot/sbin/init ]; then
+		echo "initramfs: switching to Debian on $rootdev" > /dev/kmsg
+		# stop feeding from here; systemd re-arms the watchdog (RuntimeWatchdogSec)
+		killall watchdog 2>/dev/null
+		umount /sys/fs/pstore /sys/kernel/config 2>/dev/null
+		for m in dev proc sys run; do mount -o move /$m /newroot/$m; done
+		exec switch_root /newroot /sbin/init
+	fi
+	echo "initramfs: Debian root not usable (dev=${rootdev:-none}), staying in initramfs" > /dev/kmsg
+	umount /newroot 2>/dev/null
+fi
+
+cat > /etc/udhcpd.conf <<EOF
+start 172.16.42.2
+end 172.16.42.2
+interface usb0
+option subnet 255.255.255.0
+option lease 86400
+lease_file /run/udhcpd.leases
+EOF
+touch /run/udhcpd.leases
+busybox-extras udhcpd /etc/udhcpd.conf
+busybox-extras telnetd -l /bin/sh
+
+[ -c /dev/ttyGS0 ] && (while :; do setsid sh -c 'exec sh </dev/ttyGS0 >/dev/ttyGS0 2>&1'; sleep 1; done) &
+
+echo "initramfs up: telnet 172.16.42.1" > /dev/kmsg
+
+# --- bring-up fallback (mainline only) ---
+# A kernel that runs but never gets a USB host is invisible. Go back to the rescue system by
+# itself: a soft reboot keeps the ramoops console, which rescue copies to /run/prev-boot.
+case "$(uname -r)" in
+4.19*) ;;
+*)
+	(
+		sleep 30
+		st=$(cat /sys/class/udc/*/state 2>/dev/null)
+		if [ "$st" != configured ]; then
+			echo "no USB host after 30s (udc state: ${st:-none}), rebooting to recovery" > /dev/kmsg
+			dmesg | tail -n 5 > /dev/null
+			rebootto recovery
+		fi
+	) &
+	;;
+esac
+
+# --- status screen ---
+status_screen() {
+	i=0
+	while [ $i -lt 20 ] && [ ! -e /dev/dri/card0 ]; do sleep 1; i=$((i + 1)); done
+	# the fuel gauge sits in the battery pack: reads block when the battery is out
+	B=/sys/class/power_supply/battery
+	{
+		echo "OnePlus Nord (avicii)"
+		echo "Linux $(uname -r)"
+		echo
+		echo "$(nproc) cores, $(awk '/MemTotal/{printf "%d MB", $2/1024}' /proc/meminfo) RAM"
+		echo "battery $(timeout 3 cat $B/capacity 2>/dev/null || echo '?')% $(timeout 3 cat $B/status 2>/dev/null || echo 'no gauge')"
+		echo
+		echo "usb0 172.16.42.1  (telnet)"
+		echo "booted $(cut -d' ' -f1 /proc/uptime)s after kernel start"
+	} > /run/status.txt
+	for b in /sys/class/backlight/*; do
+		[ -e "$b/brightness" ] && echo $(($(cat $b/max_brightness) / 4)) > $b/brightness
+	done
+	drmtext -s 4 /run/status.txt > /run/drmtext.log 2>&1
+}
+status_screen &
+
+while :; do sleep 3600; done

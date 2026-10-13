@@ -1,0 +1,3405 @@
+Subject: arm64: dts: qcom: SM7250 and OnePlus Nord (avicii)
+
+Combined diff of the following commits (base v7.3-rc7):
+
+  - arm64: dts: qcom: Add SM7250 devicetree file
+  - arm64: dts: qcom: add OnePlus Nord (avicii), USB and reserved-memory fixes for SM7250
+  - arm64: dts: qcom: sm7250: add apps SMMU and APSS watchdog
+  - arm64: dts: qcom: sm7250: add TLMM pin controller and debug UART pinctrl
+  - arm64: dts: qcom: sm7250: add UFS host controller and PHY
+  - arm64: dts: qcom: sm7250-oneplus-avicii: enable UFS and add PM8150/PM8150L regulators
+  - arm64: dts: qcom: sm7250-oneplus-avicii: add PM8150 PON with reboot-mode
+  - arm64: dts: qcom: sm7250-oneplus-avicii: reserve TZ-owned GPIOs
+  - ufs: qcom: limit SM7250 to 32-bit DMA; avicii: keep boot rails always-on
+  - arm64: dts: qcom: sm7250: add TSENS and thermal zones with cpufreq cooling
+  - arm64: dts: qcom: sm7250-oneplus-avicii: add PM8150L, PM7250B, power and volume keys
+  - arm64: dts: qcom: sm7250: add QUP wrappers with iommus, i2c11 and the bq27541 gauge
+  - arm64: dts: qcom: sm7250: add display pipeline and enable the avicii panel
+  - arm64: dts: qcom: sm7250: add IPCC, AOSS QMP, modem SMP2P, MPSS and WCN3990 Wi-Fi
+  - arm64: dts: qcom: sm7250-oneplus-avicii: enable modem and Wi-Fi
+  - arm64: dts: qcom: pm7250b, sm7250-oneplus-avicii: Add charger node
+  - arm64: dts: qcom: sm7250-oneplus-avicii: restore closing brace lost in merge
+  - arm64: dts: qcom: sm7250-oneplus-avicii: restore wifi status lost in merge
+  - pmdomain: rpmhpd: add QPHY for SM7250 and let the UFS PHY hold it
+  - arm64: dts: qcom: sm7250-oneplus-avicii: enable USB-C OTG with the PM7250B type-C port
+  - arm64: dts: qcom: sm7250-oneplus-avicii: fix battery gauge compatible, link it to the charger
+  - arm64: dts: qcom: sm7250: add GPU, GMU, GPU clock controller and GPU SMMU
+  - arm64: dts: qcom: sm7250: add GPI DMA and QUP wrapper 1 SE1 I2C
+  - arm64: dts: qcom: sm7250-oneplus-avicii: add the Goodix GT9886 touchscreen
+  - arm64: dts: qcom: sm7250: align the GPU zap shader region to 4 KiB
+  - arm64: dts: qcom: sm7250: Add ADSP remoteproc with APR services and QUP I2C9
+  - arm64: dts: qcom: sm7250-oneplus-avicii: Enable ADSP and the speaker amplifier I2C bus
+  - arm64: dts: qcom: sm7250-oneplus-avicii: Add speaker playback via Primary MI2S
+  - arm64: dts: qcom: sm7250: Add ADSP FastRPC node
+
+---
+ arch/arm64/boot/dts/qcom/Makefile                  |    1 +
+ arch/arm64/boot/dts/qcom/pm7250b.dtsi              |    6 +
+ arch/arm64/boot/dts/qcom/sm7250-oneplus-avicii.dts |  749 ++++++++++++
+ arch/arm64/boot/dts/qcom/sm7250.dtsi               | 2574 ++++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 3330 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/Makefile b/arch/arm64/boot/dts/qcom/Makefile
+index 1c86e7e98..7388957ae 100644
+--- a/arch/arm64/boot/dts/qcom/Makefile
++++ b/arch/arm64/boot/dts/qcom/Makefile
+@@ -352,6 +352,7 @@ dtb-$(CONFIG_ARCH_QCOM)	+= sm6375-sony-xperia-murray-pdx225.dtb
+ dtb-$(CONFIG_ARCH_QCOM)	+= sm7125-xiaomi-curtana.dtb
+ dtb-$(CONFIG_ARCH_QCOM)	+= sm7125-xiaomi-joyeuse.dtb
+ dtb-$(CONFIG_ARCH_QCOM)	+= sm7225-fairphone-fp4.dtb
++dtb-$(CONFIG_ARCH_QCOM)	+= sm7250-oneplus-avicii.dtb
+ dtb-$(CONFIG_ARCH_QCOM)	+= sm7325-motorola-dubai.dtb
+ dtb-$(CONFIG_ARCH_QCOM)	+= sm7325-motorola-dubai-csot.dtb
+ dtb-$(CONFIG_ARCH_QCOM)	+= sm7325-motorola-dubai-tianma.dtb
+diff --git a/arch/arm64/boot/dts/qcom/pm7250b.dtsi b/arch/arm64/boot/dts/qcom/pm7250b.dtsi
+index 43cab0712..430fb7601 100644
+--- a/arch/arm64/boot/dts/qcom/pm7250b.dtsi
++++ b/arch/arm64/boot/dts/qcom/pm7250b.dtsi
+@@ -50,6 +50,12 @@ pm7250b_vbus: usb-vbus-regulator@1100 {
+ 			status = "disabled";
+ 		};
+ 
++		pm7250b_charger: charger@1000 {
++			compatible = "qcom,pm7250b-charger";
++			reg = <0x1000>;
++			status = "disabled";
++		};
++
+ 		pm7250b_typec: typec@1500 {
+ 			compatible = "qcom,pm7250b-typec", "qcom,pm8150b-typec";
+ 			reg = <0x1500>,
+diff --git a/arch/arm64/boot/dts/qcom/sm7250-oneplus-avicii.dts b/arch/arm64/boot/dts/qcom/sm7250-oneplus-avicii.dts
+new file mode 100644
+index 000000000..d8394907c
+--- /dev/null
++++ b/arch/arm64/boot/dts/qcom/sm7250-oneplus-avicii.dts
+@@ -0,0 +1,749 @@
++// SPDX-License-Identifier: BSD-3-Clause
++/*
++ * OnePlus Nord (avicii) - milestone 1: initramfs, USB gadget, ramoops.
++ * Milestone 2: internal UFS, TLMM, rpmh regulators, reboot-mode.
++ * Milestone 3: display (MDSS/DPU/DSI0 + Samsung AMS644VK04 panel).
++ */
++
++/dts-v1/;
++
++#include <dt-bindings/gpio/gpio.h>
++#include <dt-bindings/input/input.h>
++#include <dt-bindings/input/linux-event-codes.h>
++#include <dt-bindings/pinctrl/qcom,pmic-gpio.h>
++#include <dt-bindings/regulator/qcom,rpmh-regulator.h>
++#include <dt-bindings/sound/qcom,q6asm.h>
++
++/* PM7250B is configured to use SID2/3 */
++#define PM7250B_SID 2
++#define PM7250B_SID1 3
++
++#include "sm7250.dtsi"
++#include "pm8150.dtsi"
++#include "pm8150l.dtsi"
++#include "pm7250b.dtsi"
++
++/ {
++	model = "OnePlus Nord";
++	compatible = "oneplus,avicii", "qcom,sm7250";
++	chassis-type = "handset";
++
++	/* required for bootloader to select correct board */
++	qcom,msm-id = <0x190 0x10000 0x1b8 0x10000>;
++	qcom,board-id = <8 0>;
++
++	chosen {
++	};
++
++	/* The bootloader fills in the memory size */
++	memory@80000000 {
++		device_type = "memory";
++		reg = <0x0 0x80000000 0x0 0x0>;
++	};
++
++	reserved-memory {
++		/*
++		 * Downstream: 0xcbe00000 + 0x400000 including a 0x1000
++		 * OnePlus-only devinfo zone at the end. Mainline has no such
++		 * zone, so shrink the region by 0x1000; this keeps the
++		 * console zone at the same address as with the downstream
++		 * pstore layout.
++		 */
++		ramoops@cbe00000 {
++			compatible = "ramoops";
++			reg = <0x0 0xcbe00000 0x0 0x3ff000>;
++			record-size = <0x40000>;
++			console-size = <0x40000>;
++			ftrace-size = <0x40000>;
++			pmsg-size = <0x200000>;
++			no-map;
++		};
++
++		param_mem: param@cc200000 {
++			reg = <0x0 0xcc200000 0x0 0x100000>;
++			no-map;
++		};
++
++		mtp_mem: mtp@cc300000 {
++			reg = <0x0 0xcc300000 0x0 0xb00000>;
++			no-map;
++		};
++
++		kboot_uboot_logmem: kboot-logmem@b8200000 {
++			reg = <0x0 0xb8200000 0x0 0x100000>;
++			no-map;
++		};
++	};
++};
++
++&apps_rsc {
++	regulators-0 {
++		compatible = "qcom,pm8150-rpmh-regulators";
++		qcom,pmic-id = "a";
++
++		/* Downstream: smpa4 1.8 V fixed (UFS vccq2) */
++		/*
++		 * All rails here are on when the bootloader hands over and several are
++		 * shared system rails (s4a is the main 1.8 V). Linux is the only RPMh
++		 * voter on this boot, so a consumer disabling one (ufshcd does after a
++		 * failed probe) powers the phone off: PMIC reports "vdd_shutdown".
++		 */
++		vreg_s4a_1p8: smps4 {
++			regulator-name = "vreg_s4a_1p8";
++			regulator-min-microvolt = <1800000>;
++			regulator-max-microvolt = <1800000>;
++			regulator-boot-on;
++			regulator-always-on;
++		};
++
++		/* Downstream: ldoa2 2.7 - 3.3 V (USB PHY wants 3.05 - 3.3 V) */
++		vreg_l2a_3p1: ldo2 {
++			regulator-name = "vreg_l2a_3p1";
++			regulator-min-microvolt = <3072000>;
++			regulator-max-microvolt = <3072000>;
++			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
++			regulator-boot-on;
++			regulator-always-on;
++		};
++
++		/* Downstream: ldoa5 0.72 - 1.056 V (USB PHY vdd and UFS PHY vdda: 0.88 V) */
++		vreg_l5a_0p88: ldo5 {
++			regulator-name = "vreg_l5a_0p88";
++			regulator-min-microvolt = <880000>;
++			regulator-max-microvolt = <880000>;
++			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
++			regulator-boot-on;
++			regulator-always-on;
++		};
++
++		/* Downstream: ldoa9 1.16 - 1.32 V (UFS PHY PLL) */
++		vreg_l9a_1p2: ldo9 {
++			regulator-name = "vreg_l9a_1p2";
++			regulator-min-microvolt = <1200000>;
++			regulator-max-microvolt = <1200000>;
++			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
++			regulator-boot-on;
++			regulator-always-on;
++		};
++
++		/* Downstream: ldoa13 ("pm8150_l13") 3.008 - 3.3 V, touchscreen vdd */
++		vreg_l13a_3p0: ldo13 {
++			regulator-name = "vreg_l13a_3p0";
++			regulator-min-microvolt = <3008000>;
++			regulator-max-microvolt = <3008000>;
++			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
++			regulator-boot-on;
++		};
++
++		/* Downstream: ldoa12 1.71 - 1.89 V */
++		vreg_l12a_1p8: ldo12 {
++			regulator-name = "vreg_l12a_1p8";
++			regulator-min-microvolt = <1800000>;
++			regulator-max-microvolt = <1800000>;
++			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
++			regulator-boot-on;
++			regulator-always-on;
++		};
++
++		/*
++		 * Downstream: ldoa16 ("pm8150_l16") 3.0 - 3.3 V, init 3.0 V,
++		 * proxy-voted by the bootloader. Panel vdd (3.0 V). Possibly
++		 * shared with other, not yet described, consumers: never let
++		 * the panel driver or the late cleanup switch it off.
++		 */
++		vreg_l16a_3p0: ldo16 {
++			regulator-name = "vreg_l16a_3p0";
++			regulator-min-microvolt = <3000000>;
++			regulator-max-microvolt = <3000000>;
++			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
++			regulator-boot-on;
++			regulator-always-on;
++		};
++	};
++
++	regulators-1 {
++		compatible = "qcom,pm8150l-rpmh-regulators";
++		qcom,pmic-id = "c";
++
++		/*
++		 * Downstream: ldoc7 ("pm8150a_l7") 2.704 - 3.304 V; the UFS
++		 * node asks for vcc-voltage-level 2.95 - 2.96 V.
++		 */
++		vreg_l7c_2p95: ldo7 {
++			regulator-name = "vreg_l7c_2p95";
++			regulator-min-microvolt = <2950000>;
++			regulator-max-microvolt = <2960000>;
++			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
++			regulator-boot-on;
++			regulator-always-on;
++		};
++
++		/*
++		 * Downstream: ldoc1 ("pm8150a_l1") 1.8 - 1.9 V, init 1.8 V,
++		 * proxy-voted by the bootloader. Panel vddio (1.8 V); also the
++		 * 1.8 V supply of the Goodix touchscreen, so keep it always on.
++		 */
++		vreg_l1c_1p8: ldo1 {
++			regulator-name = "vreg_l1c_1p8";
++			regulator-min-microvolt = <1800000>;
++			regulator-max-microvolt = <1800000>;
++			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
++			regulator-boot-on;
++			regulator-always-on;
++		};
++
++		/*
++		 * Downstream: ldoc3 ("pm8150a_l3") 1.136 - 1.303 V, init
++		 * 1.136 V. Panel vout (1.28 V), only used by the panel and not
++		 * proxy-voted, so left to the panel driver to switch.
++		 */
++		vreg_l3c_1p28: ldo3 {
++			regulator-name = "vreg_l3c_1p28";
++			regulator-min-microvolt = <1280000>;
++			regulator-max-microvolt = <1280000>;
++			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
++		};
++	};
++};
++
++/ {
++	/* 1.8 V of the touchscreen and its I2C pull-ups, switched by pm8150l gpio1 */
++	ts_vddio: regulator-ts-vddio {
++		compatible = "regulator-fixed";
++		regulator-name = "ts_vddio_1p8";
++		regulator-min-microvolt = <1800000>;
++		regulator-max-microvolt = <1800000>;
++		gpio = <&pm8150l_gpios 1 GPIO_ACTIVE_HIGH>;
++		enable-active-high;
++		vin-supply = <&vreg_l1c_1p8>;
++		pinctrl-names = "default";
++		pinctrl-0 = <&ts_vddio_default>;
++	};
++};
++
++&gmu {
++	status = "okay";
++};
++
++&gpu {
++	status = "okay";
++
++	zap-shader {
++		firmware-name = "qcom/sm7250/oneplus/avicii/a620_zap.mdt";
++	};
++};
++
++&mdss {
++	status = "okay";
++};
++
++&mdss_mdp {
++	status = "okay";
++};
++
++&mdss_dsi0 {
++	vdda-supply = <&vreg_l9a_1p2>;
++
++	status = "okay";
++
++	panel@0 {
++		compatible = "samsung,ams644vk04";
++		reg = <0>;
++
++		vddio-supply = <&ts_vddio>;
++		vdd-supply = <&vreg_l16a_3p0>;
++		vout-supply = <&vreg_l3c_1p28>;
++
++		/*
++		 * Downstream reset sequence is <1 10ms 0 10ms 1 10ms> on the
++		 * raw pin level, flags 0: the pin is low while the panel is
++		 * in reset, i.e. the reset line is active low.
++		 */
++		reset-gpios = <&pm8150l_gpios 3 GPIO_ACTIVE_LOW>;
++
++		pinctrl-names = "default";
++		pinctrl-0 = <&mdp_vsync_te_active>, <&panel_reset_default>;
++
++		port {
++			panel_in: endpoint {
++				remote-endpoint = <&mdss_dsi0_out>;
++			};
++		};
++	};
++};
++
++&mdss_dsi0_out {
++	remote-endpoint = <&panel_in>;
++	data-lanes = <0 1 2 3>;
++	/* downstream qcom,panel-te-source = <0>, TE on TLMM gpio10 */
++	qcom,te-source = "mdp_vsync_p";
++};
++
++&mdss_dsi0_phy {
++	vdds-supply = <&vreg_l5a_0p88>;
++
++	status = "okay";
++};
++
++&pm8150l_gpios {
++	/* Downstream enable1v8_gpio of the Goodix touchscreen */
++	ts_vddio_default: ts-vddio-default-state {
++		pins = "gpio1";
++		function = "normal";
++		power-source = <0>;
++		bias-disable;
++		output-low;
++		qcom,drive-strength = <PMIC_GPIO_STRENGTH_LOW>;
++	};
++
++	/* Downstream disp_pins_default; pin held low = panel in reset */
++	panel_reset_default: panel-reset-default-state {
++		pins = "gpio3";
++		function = "normal";
++		power-source = <0>;
++		bias-disable;
++		output-low;
++		qcom,drive-strength = <PMIC_GPIO_STRENGTH_MED>;
++	};
++};
++
++&pon {
++	/* PON_SOFT_RB_SPARE values, downstream PON_RESTART_REASON_* */
++	mode-bootloader = <0x2>;
++	mode-recovery = <0x1>;
++};
++
++&tlmm {
++	/*
++	 * Owned by TZ, reading them kills the system: SE1 SPI (NFC secure
++	 * element, gpio0-3, not probed) and SE6 SPI (fingerprint, gpio59-62,
++	 * confirmed: boot dies on gpio59).
++	 */
++	gpio-reserved-ranges = <0 4>, <59 4>;
++
++	/* Touchscreen interrupt and reset, downstream ts_int_active / ts_reset_active */
++	ts_int_default: ts-int-default-state {
++		pins = "gpio9";
++		function = "gpio";
++		drive-strength = <2>;
++		bias-disable;
++	};
++
++	ts_reset_default: ts-reset-default-state {
++		pins = "gpio8";
++		function = "gpio";
++		drive-strength = <2>;
++		bias-disable;
++	};
++
++	/* Speaker amplifier reset, downstream aw_reset_active */
++	amp_reset_default: amp-reset-default-state {
++		pins = "gpio125";
++		function = "gpio";
++		drive-strength = <2>;
++		bias-disable;
++	};
++
++	/*
++	 * Primary MI2S to the speaker amplifier, downstream pri_i2s_*_active.
++	 * The amplifier is fed from data line 1 (gpio52, downstream
++	 * qcom,msm-mi2s-rx-lines = <2>); gpio51 (line 0) is its sense output.
++	 */
++	pri_mi2s_default: pri-mi2s-default-state {
++		sck-pins {
++			pins = "gpio49";
++			function = "pri_mi2s";
++			drive-strength = <4>;
++			bias-disable;
++		};
++
++		ws-pins {
++			pins = "gpio50";
++			function = "pri_mi2s_ws";
++			drive-strength = <4>;
++			bias-disable;
++		};
++
++		data-pins {
++			pins = "gpio52";
++			function = "pri_mi2s";
++			drive-strength = <4>;
++			bias-disable;
++		};
++	};
++
++	/* Panel tearing-effect line, downstream sde_te_active */
++	mdp_vsync_te_active: mdp-vsync-te-active-state {
++		pins = "gpio10";
++		function = "mdp_vsync";
++		drive-strength = <2>;
++		bias-pull-down;
++	};
++};
++
++&ufs_mem_hc {
++	vcc-supply = <&vreg_l7c_2p95>;
++	vcc-max-microamp = <800000>;
++	vccq2-supply = <&vreg_s4a_1p8>;
++	vccq2-max-microamp = <800000>;
++
++	status = "okay";
++};
++
++&ufs_mem_phy {
++	vdda-phy-supply = <&vreg_l5a_0p88>;
++	vdda-pll-supply = <&vreg_l9a_1p2>;
++
++	status = "okay";
++};
++
++&usb_1 {
++	status = "okay";
++};
++
++&usb_1_dwc3 {
++	/* Role follows the PM7250B type-C port: gadget by default, host with an OTG cable */
++	dr_mode = "otg";
++	maximum-speed = "high-speed";
++};
++
++&usb_1_dwc3_hs_out {
++	remote-endpoint = <&pm7250b_hs_in>;
++};
++
++&usb_1_hsphy {
++	vdda-pll-supply = <&vreg_l5a_0p88>;
++	vdda18-supply = <&vreg_l12a_1p8>;
++	vdda33-supply = <&vreg_l2a_3p1>;
++
++	status = "okay";
++};
++
++/* Volume keys: vol-up on PM8150L gpio5, vol-down on PM7250B gpio3 (active low) */
++/ {
++	gpio-keys {
++		compatible = "gpio-keys";
++		pinctrl-names = "default";
++		pinctrl-0 = <&key_vol_up_default>, <&key_vol_down_default>;
++
++		key-volume-up {
++			label = "Volume Up";
++			gpios = <&pm8150l_gpios 5 GPIO_ACTIVE_LOW>;
++			linux,code = <KEY_VOLUMEUP>;
++			debounce-interval = <15>;
++			wakeup-source;
++		};
++
++		key-volume-down {
++			label = "Volume Down";
++			gpios = <&pm7250b_gpios 3 GPIO_ACTIVE_LOW>;
++			linux,code = <KEY_VOLUMEDOWN>;
++			debounce-interval = <15>;
++			wakeup-source;
++		};
++	};
++};
++
++&pon_pwrkey {
++	status = "okay";
++};
++
++&pm8150l_gpios {
++	key_vol_up_default: key-vol-up-default-state {
++		pins = "gpio5";
++		function = "normal";
++		input-enable;
++		bias-pull-up;
++		power-source = <0>;
++	};
++};
++
++&pm7250b_gpios {
++	key_vol_down_default: key-vol-down-default-state {
++		pins = "gpio3";
++		function = "normal";
++		input-enable;
++		bias-pull-up;
++		power-source = <0>;
++	};
++};
++
++/* Battery pack: OnePlus gauge with bq27411 register layout (DEVICE_TYPE 0x0421), qupv3_se11_i2c at 100 kHz */
++&i2c11 {
++	clock-frequency = <100000>;
++
++	status = "okay";
++
++	battery_gauge: battery@55 {
++		compatible = "ti,bq27411";
++		reg = <0x55>;
++	};
++};
++
++/*
++ * Milestone 4: Wi-Fi (WCN3990 via ath10k_snoc, wlan_pd inside the modem).
++ *
++ * The modem is not started at boot (auto_boot is false): userspace starts it
++ * with "echo start > /sys/class/remoteproc/remoteproc0/state" once the root
++ * filesystem with the firmware is mounted.
++ */
++/ {
++	reserved-memory {
++		/*
++		 * Downstream: qcom,rmtfs_sharedmem (client 1, size 0x280000),
++		 * dynamically allocated, so the address is only handed to the
++		 * modem through the rmtfs QMI service. Place it in free RAM
++		 * between dfps_data_mem and kboot_uboot_logmem.
++		 */
++		rmtfs_mem: rmtfs {
++			compatible = "qcom,rmtfs-mem";
++			size = <0x0 0x280000>;
++			alloc-ranges = <0x0 0xa4000000 0x0 0x10000000>;
++			alignment = <0x0 0x400000>;
++			no-map;
++
++			qcom,client-id = <1>;
++			qcom,vmid = <15>; /* QCOM_SCM_VMID_MSS_MSA */
++		};
++	};
++};
++
++/*
++ * WLAN rails. Downstream icnss requests: cx-mx 0.752 V, xo 1.8 V,
++ * rfa 1.304 V, ch0/ch1 3.312 V. pm8150 l1/l14 are not WLAN-only as far as
++ * is known (the bootloader may leave them on and BT shares l14), so they are
++ * always-on; the pm8150l rails only feed WLAN/BT and are switchable.
++ */
++&apps_rsc {
++	regulators-2 {
++		compatible = "qcom,pm8150-rpmh-regulators";
++		qcom,pmic-id = "a";
++
++		/* Downstream: pm8150_l1 0.352 - 0.952 V, icnss asks 0.752 V */
++		vreg_l1a_0p75: ldo1 {
++			regulator-name = "vreg_l1a_0p75";
++			regulator-min-microvolt = <752000>;
++			regulator-max-microvolt = <752000>;
++			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
++			regulator-boot-on;
++			regulator-always-on;
++		};
++
++		/* Downstream: pm8150_l14 1.616 - 1.984 V, icnss asks 1.8 V */
++		vreg_l14a_1p8: ldo14 {
++			regulator-name = "vreg_l14a_1p8";
++			regulator-min-microvolt = <1800000>;
++			regulator-max-microvolt = <1800000>;
++			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
++			regulator-boot-on;
++			regulator-always-on;
++		};
++	};
++
++	regulators-3 {
++		compatible = "qcom,pm8150l-rpmh-regulators";
++		qcom,pmic-id = "c";
++
++		/* Downstream: pm8150a_l2 1.144 - 1.328 V, icnss asks 1.304 V */
++		vreg_l2c_1p3: ldo2 {
++			regulator-name = "vreg_l2c_1p3";
++			regulator-min-microvolt = <1304000>;
++			regulator-max-microvolt = <1304000>;
++			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
++		};
++
++		/* Downstream: pm8150a_l10 3.0 - 3.312 V, icnss asks 3.312 V */
++		vreg_l10c_3p3: ldo10 {
++			regulator-name = "vreg_l10c_3p3";
++			regulator-min-microvolt = <3312000>;
++			regulator-max-microvolt = <3312000>;
++			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
++		};
++
++		/* Downstream: pm8150a_l11 3.0 - 3.312 V, icnss asks 3.312 V */
++		vreg_l11c_3p3: ldo11 {
++			regulator-name = "vreg_l11c_3p3";
++			regulator-min-microvolt = <3312000>;
++			regulator-max-microvolt = <3312000>;
++			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
++		};
++	};
++};
++
++&adsp {
++	/* split image: adsp.mdt + adsp.b00 ... in that directory */
++	firmware-name = "qcom/sm7250/oneplus/avicii/adsp.mdt";
++
++	status = "okay";
++};
++
++&mpss {
++	/* split image: modem.mdt + modem.b00 ... modem.b33 in that directory */
++	firmware-name = "qcom/sm7250/oneplus/avicii/modem.mdt";
++
++	status = "okay";
++};
++
++&wifi {
++	vdd-0.8-cx-mx-supply = <&vreg_l1a_0p75>;
++	vdd-1.8-xo-supply = <&vreg_l14a_1p8>;
++	vdd-1.3-rfa-supply = <&vreg_l2c_1p3>;
++	vdd-3.3-ch0-supply = <&vreg_l10c_3p3>;
++	vdd-3.3-ch1-supply = <&vreg_l11c_3p3>;
++
++	/* board data: ath10k/WCN3990/hw1.0/avicii/board-2.bin (or board.bin) */
++	firmware-name = "avicii";
++
++	status = "okay";
++};
++
++/* Charger status, charge inhibit (bypass charging) and charge limit */
++&pm7250b_charger {
++	power-supplies = <&battery_gauge>;
++
++	status = "okay";
++};
++
++/*
++ * USB-C port: PM7250B type-C controller (CC detection, role) and the SMB5 OTG
++ * boost as VBUS source. Downstream feeds the PD PHY from pm8150 l2.
++ */
++&pm7250b_typec {
++	vdd-pdphy-supply = <&vreg_l2a_3p1>;
++
++	status = "okay";
++
++	connector {
++		compatible = "usb-c-connector";
++
++		power-role = "dual";
++		data-role = "dual";
++		self-powered;
++
++		/* Plain Type-C (5 V, current advertisement); no PD negotiation yet */
++		typec-power-opmode = "default";
++		pd-disable;
++
++		vbus-supply = <&pm7250b_vbus>;
++
++		ports {
++			#address-cells = <1>;
++			#size-cells = <0>;
++
++			port@0 {
++				reg = <0>;
++
++				pm7250b_hs_in: endpoint {
++					remote-endpoint = <&usb_1_dwc3_hs_out>;
++				};
++			};
++		};
++	};
++};
++
++&pm7250b_vbus {
++	regulator-min-microamp = <500000>;
++	regulator-max-microamp = <1500000>;
++
++	status = "okay";
++};
++
++/*
++ * Touchscreen: Goodix GT9886 on downstream qupv3_se7_i2c (gpio6/7); panel
++ * coordinates 1080x2400 (touchpanel,panel-coords).
++ */
++&gpi_dma0 {
++	status = "okay";
++};
++
++&i2c1 {
++	clock-frequency = <400000>;
++
++	status = "okay";
++
++	touchscreen@5d {
++		compatible = "goodix,gt9886";
++		reg = <0x5d>;
++
++		interrupt-parent = <&tlmm>;
++		interrupts = <9 IRQ_TYPE_EDGE_FALLING>;
++		reset-gpios = <&tlmm 8 GPIO_ACTIVE_LOW>;
++
++		vdd-supply = <&vreg_l13a_3p0>;
++		vddio-supply = <&ts_vddio>;
++
++		pinctrl-names = "default";
++		pinctrl-0 = <&ts_int_default>, <&ts_reset_default>;
++
++		touchscreen-size-x = <1080>;
++		touchscreen-size-y = <2400>;
++	};
++};
++
++/*
++ * Speaker amplifier bus: downstream qupv3_se9_i2c (gpio46/47)
++ */
++&i2c9 {
++	clock-frequency = <400000>;
++
++	status = "okay";
++
++	speaker_amp: audio-codec@34 {
++		compatible = "nxp,tfa9874";
++		reg = <0x34>;
++
++		/* Downstream pulses gpio125 high; it also answers while held high */
++		reset-gpios = <&tlmm 125 GPIO_ACTIVE_LOW>;
++		pinctrl-names = "default";
++		pinctrl-0 = <&amp_reset_default>;
++
++		vddd-supply = <&vreg_s4a_1p8>;
++
++		#sound-dai-cells = <0>;
++	};
++};
++
++&q6afedai {
++	dai@16 {
++		reg = <PRIMARY_MI2S_RX>;
++		qcom,sd-lines = <1>;
++	};
++};
++
++&q6asmdai {
++	dai@0 {
++		reg = <MSM_FRONTEND_DAI_MULTIMEDIA1>;
++	};
++};
++
++&sound {
++	compatible = "qcom,sm8250-sndcard";
++	model = "OnePlus-Nord-TFA9874";
++
++	pinctrl-names = "default";
++	pinctrl-0 = <&pri_mi2s_default>;
++
++	mm1-dai-link {
++		link-name = "MultiMedia1";
++
++		cpu {
++			sound-dai = <&q6asmdai MSM_FRONTEND_DAI_MULTIMEDIA1>;
++		};
++	};
++
++	primary-mi2s-dai-link {
++		link-name = "Primary MI2S Playback";
++
++		cpu {
++			sound-dai = <&q6afedai PRIMARY_MI2S_RX>;
++		};
++
++		platform {
++			sound-dai = <&q6routing>;
++		};
++
++		codec {
++			sound-dai = <&speaker_amp>;
++		};
++	};
++};
+diff --git a/arch/arm64/boot/dts/qcom/sm7250.dtsi b/arch/arm64/boot/dts/qcom/sm7250.dtsi
+new file mode 100644
+index 000000000..3425e183e
+--- /dev/null
++++ b/arch/arm64/boot/dts/qcom/sm7250.dtsi
+@@ -0,0 +1,2574 @@
++// SPDX-License-Identifier: BSD-3-Clause
++/*
++ * Copyright (c) 2026, Sreeshankar K <sreeshankar0910@gmail.com>
++ */
++
++#include <dt-bindings/clock/qcom,dsi-phy-28nm.h>
++#include <dt-bindings/clock/qcom,gpucc-sm7250.h>
++#include <dt-bindings/clock/qcom,rpmh.h>
++#include <dt-bindings/clock/qcom,sm7250-dispcc.h>
++#include <dt-bindings/clock/qcom,sm7250-gcc.h>
++#include <dt-bindings/dma/qcom-gpi.h>
++#include <dt-bindings/interrupt-controller/arm-gic.h>
++#include <dt-bindings/mailbox/qcom-ipcc.h>
++#include <dt-bindings/power/qcom,rpmhpd.h>
++#include <dt-bindings/power/qcom-rpmpd.h>
++#include <dt-bindings/soc/qcom,apr.h>
++#include <dt-bindings/soc/qcom,rpmh-rsc.h>
++#include <dt-bindings/sound/qcom,q6afe.h>
++#include <dt-bindings/thermal/thermal.h>
++
++/ {
++	interrupt-parent = <&intc>;
++	#address-cells = <2>;
++	#size-cells = <2>;
++
++	clocks {
++		xo_board: xo-board {
++			compatible = "fixed-clock";
++			clock-frequency = <38400000>;
++			#clock-cells = <0>;
++		};
++
++		sleep_clk: sleep-clk {
++			compatible = "fixed-clock";
++			clock-frequency = <32764>;
++			#clock-cells = <0>;
++		};
++	};
++
++	cpus {
++		#address-cells = <2>;
++		#size-cells = <0>;
++
++		cpu0: cpu@0 {
++			device_type = "cpu";
++			compatible = "qcom,kryo475";
++			reg = <0x0 0x0>;
++			clocks = <&cpufreq_hw 0>;
++			enable-method = "psci";
++			capacity-dmips-mhz = <1024>;
++			dynamic-power-coefficient = <100>;
++			next-level-cache = <&l2_0>;
++			qcom,freq-domain = <&cpufreq_hw 0>;
++			power-domains = <&cpu_pd0>;
++			power-domain-names = "psci";
++			#cooling-cells = <2>;
++
++			l2_0: l2-cache {
++				compatible = "cache";
++				cache-level = <2>;
++				cache-size = <0x20000>;
++				cache-unified;
++				next-level-cache = <&l3_0>;
++
++				l3_0: l3-cache {
++					compatible = "cache";
++					cache-level = <3>;
++					cache-size = <0x200000>;
++					cache-unified;
++				};
++			};
++		};
++
++		cpu1: cpu@100 {
++			device_type = "cpu";
++			compatible = "qcom,kryo475";
++			reg = <0x0 0x100>;
++			clocks = <&cpufreq_hw 0>;
++			enable-method = "psci";
++			capacity-dmips-mhz = <1024>;
++			dynamic-power-coefficient = <100>;
++			next-level-cache = <&l2_100>;
++			qcom,freq-domain = <&cpufreq_hw 0>;
++			power-domains = <&cpu_pd1>;
++			power-domain-names = "psci";
++			#cooling-cells = <2>;
++
++			l2_100: l2-cache {
++				compatible = "cache";
++				cache-level = <2>;
++				cache-size = <0x20000>;
++				cache-unified;
++				next-level-cache = <&l3_0>;
++			};
++		};
++
++		cpu2: cpu@200 {
++			device_type = "cpu";
++			compatible = "qcom,kryo475";
++			reg = <0x0 0x200>;
++			clocks = <&cpufreq_hw 0>;
++			enable-method = "psci";
++			capacity-dmips-mhz = <1024>;
++			dynamic-power-coefficient = <100>;
++			next-level-cache = <&l2_200>;
++			qcom,freq-domain = <&cpufreq_hw 0>;
++			power-domains = <&cpu_pd2>;
++			power-domain-names = "psci";
++			#cooling-cells = <2>;
++
++			l2_200: l2-cache {
++				compatible = "cache";
++				cache-level = <2>;
++				cache-size = <0x20000>;
++				cache-unified;
++				next-level-cache = <&l3_0>;
++			};
++		};
++
++		cpu3: cpu@300 {
++			device_type = "cpu";
++			compatible = "qcom,kryo475";
++			reg = <0x0 0x300>;
++			clocks = <&cpufreq_hw 0>;
++			enable-method = "psci";
++			capacity-dmips-mhz = <1024>;
++			dynamic-power-coefficient = <100>;
++			next-level-cache = <&l2_300>;
++			qcom,freq-domain = <&cpufreq_hw 0>;
++			power-domains = <&cpu_pd3>;
++			power-domain-names = "psci";
++			#cooling-cells = <2>;
++
++			l2_300: l2-cache {
++				compatible = "cache";
++				cache-level = <2>;
++				cache-size = <0x20000>;
++				cache-unified;
++				next-level-cache = <&l3_0>;
++			};
++		};
++
++		cpu4: cpu@400 {
++			device_type = "cpu";
++			compatible = "qcom,kryo475";
++			reg = <0x0 0x400>;
++			clocks = <&cpufreq_hw 0>;
++			enable-method = "psci";
++			capacity-dmips-mhz = <1024>;
++			dynamic-power-coefficient = <100>;
++			next-level-cache = <&l2_400>;
++			qcom,freq-domain = <&cpufreq_hw 0>;
++			power-domains = <&cpu_pd4>;
++			power-domain-names = "psci";
++			#cooling-cells = <2>;
++
++			l2_400: l2-cache {
++				compatible = "cache";
++				cache-level = <2>;
++				cache-size = <0x20000>;
++				cache-unified;
++				next-level-cache = <&l3_0>;
++			};
++		};
++
++		cpu5: cpu@500 {
++			device_type = "cpu";
++			compatible = "qcom,kryo475";
++			reg = <0x0 0x500>;
++			clocks = <&cpufreq_hw 0>;
++			enable-method = "psci";
++			capacity-dmips-mhz = <1024>;
++			dynamic-power-coefficient = <100>;
++			next-level-cache = <&l2_500>;
++			qcom,freq-domain = <&cpufreq_hw 0>;
++			power-domains = <&cpu_pd5>;
++			power-domain-names = "psci";
++			#cooling-cells = <2>;
++
++			l2_500: l2-cache {
++				compatible = "cache";
++				cache-level = <2>;
++				cache-size = <0x20000>;
++				cache-unified;
++				next-level-cache = <&l3_0>;
++			};
++		};
++
++		cpu6: cpu@600 {
++			device_type = "cpu";
++			compatible = "qcom,kryo475";
++			reg = <0x0 0x600>;
++			clocks = <&cpufreq_hw 1>;
++			enable-method = "psci";
++			capacity-dmips-mhz = <1740>;
++			dynamic-power-coefficient = <341>;
++			next-level-cache = <&l2_600>;
++			qcom,freq-domain = <&cpufreq_hw 1>;
++			power-domains = <&cpu_pd6>;
++			power-domain-names = "psci";
++			#cooling-cells = <2>;
++
++			l2_600: l2-cache {
++				compatible = "cache";
++				cache-level = <2>;
++				cache-size = <0x40000>;
++				cache-unified;
++				next-level-cache = <&l3_0>;
++			};
++		};
++
++		cpu7: cpu@700 {
++			device_type = "cpu";
++			compatible = "qcom,kryo475";
++			reg = <0x0 0x700>;
++			clocks = <&cpufreq_hw 2>;
++			enable-method = "psci";
++			capacity-dmips-mhz = <1740>;
++			dynamic-power-coefficient = <375>;
++			next-level-cache = <&l2_700>;
++			qcom,freq-domain = <&cpufreq_hw 2>;
++			power-domains = <&cpu_pd7>;
++			power-domain-names = "psci";
++			#cooling-cells = <2>;
++
++			l2_700: l2-cache {
++				compatible = "cache";
++				cache-level = <2>;
++				cache-size = <0x80000>;
++				cache-unified;
++				next-level-cache = <&l3_0>;
++			};
++		};
++
++		cpu-map {
++			cluster0 {
++				core0 {
++					cpu = <&cpu0>;
++				};
++
++				core1 {
++					cpu = <&cpu1>;
++				};
++
++				core2 {
++					cpu = <&cpu2>;
++				};
++
++				core3 {
++					cpu = <&cpu3>;
++				};
++
++				core4 {
++					cpu = <&cpu4>;
++				};
++
++				core5 {
++					cpu = <&cpu5>;
++				};
++			};
++
++			cluster1 {
++				core6 {
++					cpu = <&cpu6>;
++				};
++			};
++
++			cluster2 {
++				core7 {
++					cpu = <&cpu7>;
++				};
++			};
++		};
++
++		domain-idle-states {
++			cluster_sleep_pc: cluster-sleep-0 {
++				compatible = "domain-idle-state";
++				arm,psci-suspend-param = <0x41000044>;
++				entry-latency-us = <2752>;
++				exit-latency-us = <3048>;
++				min-residency-us = <6118>;
++			};
++
++			cluster_sleep_cx: cluster-sleep-1 {
++				compatible = "domain-idle-state";
++				arm,psci-suspend-param = <0x41001244>;
++				entry-latency-us = <3638>;
++				exit-latency-us = <4562>;
++				min-residency-us = <8467>;
++			};
++
++			cluster_sleep_aoss: cluster-sleep-2 {
++				compatible = "domain-idle-state";
++				arm,psci-suspend-param = <0x4100b244>;
++				entry-latency-us = <3263>;
++				exit-latency-us = <6562>;
++				min-residency-us = <9826>;
++			};
++		};
++
++		idle-states {
++			entry-method = "psci";
++
++			little_cpu_sleep_0: cpu-sleep-0-0 {
++				compatible = "arm,idle-state";
++				idle-state-name = "little-power-collapse";
++				arm,psci-suspend-param = <0x40000003>;
++				entry-latency-us = <549>;
++				exit-latency-us = <901>;
++				min-residency-us = <1774>;
++				local-timer-stop;
++			};
++
++			little_cpu_sleep_1: cpu-sleep-0-1 {
++				compatible = "arm,idle-state";
++				idle-state-name = "little-rail-power-collapse";
++				arm,psci-suspend-param = <0x40000004>;
++				entry-latency-us = <702>;
++				exit-latency-us = <915>;
++				min-residency-us = <4001>;
++				local-timer-stop;
++			};
++
++			big_cpu_sleep_0: cpu-sleep-1-0 {
++				compatible = "arm,idle-state";
++				idle-state-name = "big-power-collapse";
++				arm,psci-suspend-param = <0x40000003>;
++				entry-latency-us = <523>;
++				exit-latency-us = <1244>;
++				min-residency-us = <2207>;
++				local-timer-stop;
++			};
++
++			big_cpu_sleep_1: cpu-sleep-1-1 {
++				compatible = "arm,idle-state";
++				idle-state-name = "big-rail-power-collapse";
++				arm,psci-suspend-param = <0x40000004>;
++				entry-latency-us = <526>;
++				exit-latency-us = <1854>;
++				min-residency-us = <5555>;
++				local-timer-stop;
++			};
++		};
++	};
++
++	firmware {
++		scm: scm {
++			compatible = "qcom,scm-sm7250", "qcom,scm";
++			#reset-cells = <1>;
++		};
++	};
++
++	memory@80000000 {
++		device_type = "memory";
++		/* We expect the bootloader to fill in the size */
++		reg = <0x0 0x80000000 0x0 0x0>;
++	};
++
++	pmu {
++		compatible = "arm,armv8-pmuv3";
++		interrupts = <GIC_PPI 5 IRQ_TYPE_LEVEL_HIGH>;
++	};
++
++	psci {
++		compatible = "arm,psci-1.0";
++		method = "smc";
++
++		cpu_pd0: power-domain-cpu0 {
++			#power-domain-cells = <0>;
++			power-domains = <&cluster_pd>;
++			domain-idle-states = <&little_cpu_sleep_0>,
++					     <&little_cpu_sleep_1>;
++		};
++
++		cpu_pd1: power-domain-cpu1 {
++			#power-domain-cells = <0>;
++			power-domains = <&cluster_pd>;
++			domain-idle-states = <&little_cpu_sleep_0>,
++					     <&little_cpu_sleep_1>;
++		};
++
++		cpu_pd2: power-domain-cpu2 {
++			#power-domain-cells = <0>;
++			power-domains = <&cluster_pd>;
++			domain-idle-states = <&little_cpu_sleep_0>,
++					     <&little_cpu_sleep_1>;
++		};
++
++		cpu_pd3: power-domain-cpu3 {
++			#power-domain-cells = <0>;
++			power-domains = <&cluster_pd>;
++			domain-idle-states = <&little_cpu_sleep_0>,
++					     <&little_cpu_sleep_1>;
++		};
++
++		cpu_pd4: power-domain-cpu4 {
++			#power-domain-cells = <0>;
++			power-domains = <&cluster_pd>;
++			domain-idle-states = <&little_cpu_sleep_0>,
++					     <&little_cpu_sleep_1>;
++		};
++
++		cpu_pd5: power-domain-cpu5 {
++			#power-domain-cells = <0>;
++			power-domains = <&cluster_pd>;
++			domain-idle-states = <&little_cpu_sleep_0>,
++					     <&little_cpu_sleep_1>;
++		};
++
++		cpu_pd6: power-domain-cpu6 {
++			#power-domain-cells = <0>;
++			power-domains = <&cluster_pd>;
++			domain-idle-states = <&big_cpu_sleep_0>,
++					     <&big_cpu_sleep_1>;
++		};
++
++		cpu_pd7: power-domain-cpu7 {
++			#power-domain-cells = <0>;
++			power-domains = <&cluster_pd>;
++			domain-idle-states = <&big_cpu_sleep_0>,
++					     <&big_cpu_sleep_1>;
++		};
++
++		cluster_pd: power-domain-cpu-cluster0 {
++			#power-domain-cells = <0>;
++			domain-idle-states = <&cluster_sleep_pc>,
++					     <&cluster_sleep_cx>,
++					     <&cluster_sleep_aoss>;
++		};
++	};
++
++	reserved_memory: reserved-memory {
++		#address-cells = <2>;
++		#size-cells = <2>;
++		ranges;
++
++		hyp_mem: hyp@80000000 {
++			reg = <0x0 0x80000000 0x0 0x600000>;
++			no-map;
++		};
++
++		xbl_aop_mem: xbl-aop@80700000 {
++			reg = <0x0 0x80700000 0x0 0x160000>;
++			no-map;
++		};
++
++		cmd_db: cmd-db@80860000 {
++			compatible = "qcom,cmd-db";
++			reg = <0x0 0x80860000 0x0 0x20000>;
++			no-map;
++		};
++
++		xbl_uefi_mem: xbl-uefi@80880000 {
++			reg = <0 0x80880000 0 0x14000>;
++			no-map;
++		};
++
++		smem_mem: smem@80900000 {
++			compatible = "qcom,smem";
++			reg = <0x0 0x80900000 0x0 0x200000>;
++			no-map;
++			hwlocks = <&tcsr_mutex 3>;
++		};
++
++		removed_mem: removed@80b00000 {
++			reg = <0x0 0x80b00000 0x0 0x1300000>;
++			no-map;
++		};
++
++		sec_apps_mem: sec-apps@808ff000 {
++			reg = <0x0 0x808ff000 0x0 0x1000>;
++			no-map;
++		};
++
++		qtee_apps_mem: qtee-apps@81e00000 {
++			reg = <0x0 0x81e00000 0x0 0x6800000>;
++			no-map;
++		};
++
++		adsp_mem: adsp@89200000 {
++			reg = <0x0 0x89200000 0x0 0x2800000>;
++			no-map;
++		};
++
++		wlan_fw_mem: wlan-fw@8ba00000 {
++			reg = <0x0 0x8ba00000 0x0 0x200000>;
++			no-map;
++		};
++
++		ipa_fw_mem: ipa-fw@8bc00000 {
++			reg = <0x0 0x8bc00000 0x0 0x10000>;
++			no-map;
++		};
++
++		ipa_gsi_mem: ipa-gsi@8bc10000 {
++			reg = <0x0 0x8bc10000 0x0 0x5400>;
++			no-map;
++		};
++
++		/*
++		 * The firmware reserves 0x8bc15400..0x8bc17400 for the GPU zap
++		 * shader, but TrustZone only accepts a 4 KiB aligned load
++		 * address, so the unaligned head is a separate region.
++		 */
++		gpu_pad_mem: gpu-pad@8bc15400 {
++			reg = <0x0 0x8bc15400 0x0 0xc00>;
++			no-map;
++		};
++
++		gpu_mem: gpu@8bc16000 {
++			reg = <0x0 0x8bc16000 0x0 0x1400>;
++			no-map;
++		};
++
++		reserved_pil_mem: reserved-pil@8bc17400 {
++			reg = <0x0 0x8bc17400 0x0 0x3e8c00>;
++			no-map;
++		};
++
++		modem_wlan_mem: modem-wlan@8c000000 {
++			reg = <0x0 0x8c000000 0x0 0xf800000>;
++			no-map;
++		};
++
++		camera_mem: camera@9b800000 {
++			reg = <0x0 0x9b800000 0x0 0x500000>;
++			no-map;
++		};
++
++		npu_mem: npu@9bd00000 {
++			reg = <0x0 0x9bd00000 0x0 0x500000>;
++			no-map;
++		};
++
++		video_mem: video@9c200000 {
++			reg = <0x0 0x9c200000 0x0 0x500000>;
++			no-map;
++		};
++
++		cdsp_mem: cdsp@9c700000 {
++			reg = <0x0 0x9c700000 0x0 0x1e00000>;
++			no-map;
++		};
++
++		cdsp_sec_mem: cdsp-sec@9f400000 {
++			reg = <0x0 0x9f400000 0x0 0xc00000>;
++			no-map;
++		};
++
++		cont_splash_mem: cont-splash@a0000000 {
++			reg = <0x0 0xa0000000 0x0 0x2300000>;
++			no-map;
++		};
++
++		dfps_data_mem: dfps-data@a2300000 {
++			reg = <0x0 0xa2300000 0x0 0x100000>;
++			no-map;
++		};
++	};
++
++	smp2p-adsp {
++		compatible = "qcom,smp2p";
++		qcom,smem = <443>, <429>;
++
++		interrupts-extended = <&ipcc IPCC_CLIENT_LPASS
++					     IPCC_MPROC_SIGNAL_SMP2P
++					     IRQ_TYPE_EDGE_RISING>;
++		mboxes = <&ipcc IPCC_CLIENT_LPASS
++				IPCC_MPROC_SIGNAL_SMP2P>;
++
++		qcom,local-pid = <0>;
++		qcom,remote-pid = <2>;
++
++		smp2p_adsp_out: master-kernel {
++			qcom,entry-name = "master-kernel";
++			#qcom,smem-state-cells = <1>;
++		};
++
++		smp2p_adsp_in: slave-kernel {
++			qcom,entry-name = "slave-kernel";
++			interrupt-controller;
++			#interrupt-cells = <2>;
++		};
++	};
++
++	smp2p-mpss {
++		compatible = "qcom,smp2p";
++		qcom,smem = <435>, <428>;
++
++		interrupts-extended = <&ipcc IPCC_CLIENT_MPSS
++					     IPCC_MPROC_SIGNAL_SMP2P
++					     IRQ_TYPE_EDGE_RISING>;
++		mboxes = <&ipcc IPCC_CLIENT_MPSS
++				IPCC_MPROC_SIGNAL_SMP2P>;
++
++		qcom,local-pid = <0>;
++		qcom,remote-pid = <1>;
++
++		modem_smp2p_out: master-kernel {
++			qcom,entry-name = "master-kernel";
++			#qcom,smem-state-cells = <1>;
++		};
++
++		modem_smp2p_in: slave-kernel {
++			qcom,entry-name = "slave-kernel";
++			interrupt-controller;
++			#interrupt-cells = <2>;
++		};
++	};
++
++	soc: soc@0 {
++		compatible = "simple-bus";
++		#address-cells = <2>;
++		#size-cells = <2>;
++		ranges = <0 0 0 0 0x10 0>;
++		dma-ranges = <0 0 0 0 0x10 0>;
++
++		gcc: clock-controller@100000 {
++			compatible = "qcom,sm7250-gcc";
++			reg = <0x0 0x00100000 0x0 0x1f0000>;
++			clock-names = "bi_tcxo",
++				      "bi_tcxo_ao",
++				      "sleep_clk";
++			clocks = <&rpmhcc RPMH_CXO_CLK>,
++				 <&rpmhcc RPMH_CXO_CLK_A>,
++				 <&sleep_clk>;
++			power-domains = <&rpmhpd RPMHPD_CX>;
++			#clock-cells = <1>;
++			#reset-cells = <1>;
++			#power-domain-cells = <1>;
++		};
++
++		/* Downstream qcom,gpi-dma@900000 (QUP wrapper 1), 6 usable channels */
++		gpi_dma0: dma-controller@900000 {
++			compatible = "qcom,sm6350-gpi-dma";
++			reg = <0x0 0x00900000 0x0 0x60000>;
++			interrupts = <GIC_SPI 279 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 280 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 281 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 282 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 283 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 284 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 293 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 294 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 295 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 296 IRQ_TYPE_LEVEL_HIGH>;
++			dma-channels = <10>;
++			dma-channel-mask = <0x3f>;
++			iommus = <&apps_smmu 0x36 0x0>;
++			#dma-cells = <3>;
++			status = "disabled";
++		};
++
++		/*
++		 * QUP wrapper 0 (downstream qupv3_0). None of its SEs is used on
++		 * this board yet (SE0/SE1 pins are TZ-owned gpio0-3).
++		 */
++		qupv3_id_0: geniqup@8c0000 {
++			compatible = "qcom,geni-se-qup";
++			reg = <0x0 0x008c0000 0x0 0x6000>;
++			clock-names = "m-ahb", "s-ahb";
++			clocks = <&gcc GCC_QUPV3_WRAP_0_M_AHB_CLK>,
++				 <&gcc GCC_QUPV3_WRAP_0_S_AHB_CLK>;
++			iommus = <&apps_smmu 0x4e3 0x0>;
++			#address-cells = <2>;
++			#size-cells = <2>;
++			ranges;
++			status = "disabled";
++		};
++
++		qupv3_id_1: geniqup@9c0000 {
++			compatible = "qcom,geni-se-qup";
++			reg = <0x0 0x009c0000 0x0 0x6000>;
++			clock-names = "m-ahb", "s-ahb";
++			clocks = <&gcc GCC_QUPV3_WRAP_1_M_AHB_CLK>,
++				 <&gcc GCC_QUPV3_WRAP_1_S_AHB_CLK>;
++			iommus = <&apps_smmu 0x23 0x0>;
++			#address-cells = <2>;
++			#size-cells = <2>;
++			ranges;
++
++			uart2: serial@988000 {
++				compatible = "qcom,geni-debug-uart";
++				reg = <0 0x00988000 0 0x4000>;
++				clock-names = "se";
++				clocks = <&gcc GCC_QUPV3_WRAP1_S2_CLK>;
++				interrupts = <GIC_SPI 355 IRQ_TYPE_LEVEL_HIGH>;
++				pinctrl-names = "default";
++				pinctrl-0 = <&qup_uart2_default>;
++				status = "disabled";
++			};
++
++			/* Downstream qupv3_se7_i2c (wrapper 1, SE1), gpio6/7: touchscreen */
++			i2c1: i2c@984000 {
++				compatible = "qcom,geni-i2c";
++				reg = <0 0x00984000 0 0x4000>;
++				clock-names = "se";
++				clocks = <&gcc GCC_QUPV3_WRAP1_S1_CLK>;
++				interrupts = <GIC_SPI 354 IRQ_TYPE_LEVEL_HIGH>;
++				/* the FIFO interface of this SE is disabled: GPI only */
++				dmas = <&gpi_dma0 0 1 QCOM_GPI_I2C>,
++				       <&gpi_dma0 1 1 QCOM_GPI_I2C>;
++				dma-names = "tx", "rx";
++				pinctrl-names = "default";
++				pinctrl-0 = <&qup_i2c1_default>;
++				#address-cells = <1>;
++				#size-cells = <0>;
++				status = "disabled";
++			};
++
++			/*
++			 * Downstream qupv3_se9_i2c (wrapper 1, SE3), gpio46/47:
++			 * smart speaker amplifier at 0x34 (qcom,shared downstream).
++			 */
++			i2c9: i2c@98c000 {
++				compatible = "qcom,geni-i2c";
++				reg = <0 0x0098c000 0 0x4000>;
++				clock-names = "se";
++				clocks = <&gcc GCC_QUPV3_WRAP1_S3_CLK>;
++				interrupts = <GIC_SPI 356 IRQ_TYPE_LEVEL_HIGH>;
++				dmas = <&gpi_dma0 0 3 QCOM_GPI_I2C>,
++				       <&gpi_dma0 1 3 QCOM_GPI_I2C>;
++				dma-names = "tx", "rx";
++				pinctrl-names = "default";
++				pinctrl-0 = <&qup_i2c9_default>;
++				#address-cells = <1>;
++				#size-cells = <0>;
++				status = "disabled";
++			};
++
++			/*
++			 * Downstream qupv3_se11_i2c (wrapper 1, SE5), gpio108/109.
++			 * No dmas: GPI is not described, so it runs in FIFO mode.
++			 */
++			i2c11: i2c@994000 {
++				compatible = "qcom,geni-i2c";
++				reg = <0 0x00994000 0 0x4000>;
++				clock-names = "se";
++				clocks = <&gcc GCC_QUPV3_WRAP1_S5_CLK>;
++				interrupts = <GIC_SPI 358 IRQ_TYPE_LEVEL_HIGH>;
++				pinctrl-names = "default";
++				pinctrl-0 = <&qup_i2c11_default>;
++				#address-cells = <1>;
++				#size-cells = <0>;
++				status = "disabled";
++			};
++		};
++
++		usb_1_hsphy: phy@88e3000 {
++			compatible = "qcom,sm7250-usb-hs-phy",
++				     "qcom,usb-snps-hs-7nm-phy";
++			reg = <0x0 0x088e3000 0x0 0x400>;
++			status = "disabled";
++			#phy-cells = <0>;
++
++			clocks = <&rpmhcc RPMH_CXO_CLK>;
++			clock-names = "ref";
++
++			resets = <&gcc GCC_QUSB2PHY_PRIM_BCR>;
++		};
++
++		usb_1: usb@a6f8800 {
++			compatible = "qcom,sm7250-dwc3", "qcom,dwc3";
++			reg = <0x0 0x0a6f8800 0x0 0x400>;
++			status = "disabled";
++			#address-cells = <2>;
++			#size-cells = <2>;
++			ranges;
++
++			clocks = <&gcc GCC_CFG_NOC_USB3_PRIM_AXI_CLK>,
++				 <&gcc GCC_USB30_PRIM_MASTER_CLK>,
++				 <&gcc GCC_AGGRE_USB3_PRIM_AXI_CLK>,
++				 <&gcc GCC_USB30_PRIM_SLEEP_CLK>,
++				 <&gcc GCC_USB30_PRIM_MOCK_UTMI_CLK>,
++				 <&gcc GCC_USB3_PRIM_CLKREF_CLK>;
++			clock-names = "cfg_noc",
++				      "core",
++				      "iface",
++				      "sleep",
++				      "mock_utmi",
++				      "xo";
++
++			assigned-clocks = <&gcc GCC_USB30_PRIM_MOCK_UTMI_CLK>,
++					  <&gcc GCC_USB30_PRIM_MASTER_CLK>;
++			assigned-clock-rates = <19200000>, <66666667>;
++
++			interrupts-extended = <&intc GIC_SPI 144 IRQ_TYPE_LEVEL_HIGH>,
++					      <&pdc 14 IRQ_TYPE_EDGE_BOTH>,
++					      <&pdc 15 IRQ_TYPE_EDGE_BOTH>,
++					      <&pdc 9 IRQ_TYPE_LEVEL_HIGH>;
++			interrupt-names = "pwr_event",
++					  "dp_hs_phy_irq",
++					  "dm_hs_phy_irq",
++					  "ss_phy_irq";
++
++			power-domains = <&gcc USB30_PRIM_GDSC>;
++			resets = <&gcc GCC_USB30_PRIM_BCR>;
++			wakeup-source;
++
++			/* No SS PHY described yet: run the controller HS-only */
++			qcom,select-utmi-as-pipe-clk;
++
++			usb_1_dwc3: usb@a600000 {
++				compatible = "snps,dwc3";
++				reg = <0x0 0x0a600000 0x0 0xcd00>;
++				iommus = <&apps_smmu 0xe0 0x0>;
++				interrupts = <GIC_SPI 240 IRQ_TYPE_LEVEL_HIGH>;
++				phys = <&usb_1_hsphy>;
++				phy-names = "usb2-phy";
++				snps,dis_u2_susphy_quirk;
++				snps,dis_enblslpm_quirk;
++				snps,dis-u1-entry-quirk;
++				snps,dis-u2-entry-quirk;
++				maximum-speed = "high-speed";
++				usb-role-switch;
++
++				ports {
++					#address-cells = <1>;
++					#size-cells = <0>;
++
++					port@0 {
++						reg = <0>;
++
++						usb_1_dwc3_hs_out: endpoint {
++						};
++					};
++				};
++			};
++		};
++
++		/*
++		 * Kona-style refgen (PWRDWN_CTRL5) block at the sdm845 location,
++		 * as in downstream lito-regulators.dtsi. The bootloader leaves it
++		 * enabled and it is shared with other PHYs, so never let the
++		 * regulator core switch it off.
++		 */
++		refgen: regulator@ff1000 {
++			compatible = "qcom,sm8250-refgen-regulator";
++			reg = <0x0 0x00ff1000 0x0 0x84>;
++			regulator-always-on;
++		};
++
++		mdss: display-subsystem@ae00000 {
++			compatible = "qcom,sm7250-mdss";
++			reg = <0x0 0x0ae00000 0x0 0x1000>;
++			reg-names = "mdss";
++
++			/*
++			 * No interconnect provider (mmss_noc/mc_virt) exists on
++			 * this SoC description yet: "interconnects" is omitted,
++			 * the drivers treat it as optional.
++			 */
++
++			power-domains = <&dispcc MDSS_GDSC>;
++
++			clocks = <&dispcc DISPCC_MDSS_AHB_CLK>,
++				 <&gcc GCC_DISP_HF_AXI_CLK>,
++				 <&gcc GCC_DISP_SF_AXI_CLK>,
++				 <&dispcc DISPCC_MDSS_MDP_CLK>;
++			clock-names = "iface", "bus", "nrt_bus", "core";
++
++			interrupts = <GIC_SPI 83 IRQ_TYPE_LEVEL_HIGH>;
++			interrupt-controller;
++			#interrupt-cells = <1>;
++
++			/* downstream smmu_sde_unsec: iommus = <&apps_smmu 0xb40 0x402> */
++			iommus = <&apps_smmu 0xb40 0x402>;
++
++			resets = <&dispcc DISPCC_MDSS_CORE_BCR>;
++
++			status = "disabled";
++
++			#address-cells = <2>;
++			#size-cells = <2>;
++			ranges;
++
++			mdss_mdp: display-controller@ae01000 {
++				compatible = "qcom,sm7250-dpu";
++				reg = <0x0 0x0ae01000 0x0 0x83208>,
++				      <0x0 0x0aeb0000 0x0 0x2008>;
++				reg-names = "mdp", "vbif";
++
++				clocks = <&dispcc DISPCC_MDSS_AHB_CLK>,
++					 <&gcc GCC_DISP_HF_AXI_CLK>,
++					 <&dispcc DISPCC_MDSS_MDP_CLK>,
++					 <&dispcc DISPCC_MDSS_VSYNC_CLK>;
++				clock-names = "iface", "bus", "core", "vsync";
++
++				assigned-clocks = <&dispcc DISPCC_MDSS_VSYNC_CLK>;
++				assigned-clock-rates = <19200000>;
++
++				operating-points-v2 = <&mdp_opp_table>;
++				power-domains = <&rpmhpd RPMHPD_CX>;
++
++				interrupt-parent = <&mdss>;
++				interrupts = <0>;
++
++				ports {
++					#address-cells = <1>;
++					#size-cells = <0>;
++
++					port@0 {
++						reg = <0>;
++						dpu_intf1_out: endpoint {
++							remote-endpoint = <&mdss_dsi0_in>;
++						};
++					};
++				};
++
++				/* Downstream clock vdd levels of disp_cc_mdss_mdp_clk_src */
++				mdp_opp_table: opp-table {
++					compatible = "operating-points-v2";
++
++					opp-200000000 {
++						opp-hz = /bits/ 64 <200000000>;
++						required-opps = <&rpmhpd_opp_low_svs>;
++					};
++
++					opp-300000000 {
++						opp-hz = /bits/ 64 <300000000>;
++						required-opps = <&rpmhpd_opp_svs>;
++					};
++
++					opp-345000000 {
++						opp-hz = /bits/ 64 <345000000>;
++						required-opps = <&rpmhpd_opp_svs_l1>;
++					};
++
++					opp-460000000 {
++						opp-hz = /bits/ 64 <460000000>;
++						required-opps = <&rpmhpd_opp_nom>;
++					};
++				};
++			};
++
++			mdss_dsi0: dsi@ae94000 {
++				compatible = "qcom,sm7250-dsi-ctrl",
++					     "qcom,mdss-dsi-ctrl";
++				reg = <0x0 0x0ae94000 0x0 0x400>;
++				reg-names = "dsi_ctrl";
++
++				interrupt-parent = <&mdss>;
++				interrupts = <4>;
++
++				clocks = <&dispcc DISPCC_MDSS_BYTE0_CLK>,
++					 <&dispcc DISPCC_MDSS_BYTE0_INTF_CLK>,
++					 <&dispcc DISPCC_MDSS_PCLK0_CLK>,
++					 <&dispcc DISPCC_MDSS_ESC0_CLK>,
++					 <&dispcc DISPCC_MDSS_AHB_CLK>,
++					 <&gcc GCC_DISP_HF_AXI_CLK>;
++				clock-names = "byte",
++					      "byte_intf",
++					      "pixel",
++					      "core",
++					      "iface",
++					      "bus";
++
++				assigned-clocks = <&dispcc DISPCC_MDSS_BYTE0_CLK_SRC>,
++						  <&dispcc DISPCC_MDSS_PCLK0_CLK_SRC>;
++				assigned-clock-parents = <&mdss_dsi0_phy DSI_BYTE_PLL_CLK>,
++							 <&mdss_dsi0_phy DSI_PIXEL_PLL_CLK>;
++
++				operating-points-v2 = <&dsi_opp_table>;
++				power-domains = <&rpmhpd RPMHPD_CX>;
++
++				phys = <&mdss_dsi0_phy>;
++
++				refgen-supply = <&refgen>;
++
++				status = "disabled";
++
++				#address-cells = <1>;
++				#size-cells = <0>;
++
++				ports {
++					#address-cells = <1>;
++					#size-cells = <0>;
++
++					port@0 {
++						reg = <0>;
++						mdss_dsi0_in: endpoint {
++							remote-endpoint = <&dpu_intf1_out>;
++						};
++					};
++
++					port@1 {
++						reg = <1>;
++						mdss_dsi0_out: endpoint {
++						};
++					};
++				};
++
++				/* Downstream clock vdd levels of disp_cc_mdss_byte0_clk_src */
++				dsi_opp_table: opp-table {
++					compatible = "operating-points-v2";
++
++					opp-187500000 {
++						opp-hz = /bits/ 64 <187500000>;
++						required-opps = <&rpmhpd_opp_low_svs>;
++					};
++
++					opp-300000000 {
++						opp-hz = /bits/ 64 <300000000>;
++						required-opps = <&rpmhpd_opp_svs>;
++					};
++
++					opp-358000000 {
++						opp-hz = /bits/ 64 <358000000>;
++						required-opps = <&rpmhpd_opp_svs_l1>;
++					};
++				};
++			};
++
++			/* Downstream "qcom,dsi-phy-v4.1", 7nm, same as sm8250 */
++			mdss_dsi0_phy: phy@ae94400 {
++				compatible = "qcom,dsi-phy-7nm";
++				reg = <0x0 0x0ae94400 0x0 0x200>,
++				      <0x0 0x0ae94600 0x0 0x280>,
++				      <0x0 0x0ae94900 0x0 0x260>;
++				reg-names = "dsi_phy",
++					    "dsi_phy_lane",
++					    "dsi_pll";
++
++				#clock-cells = <1>;
++				#phy-cells = <0>;
++
++				clocks = <&dispcc DISPCC_MDSS_AHB_CLK>,
++					 <&rpmhcc RPMH_CXO_CLK>;
++				clock-names = "iface", "ref";
++
++				status = "disabled";
++			};
++		};
++
++		dispcc: clock-controller@af00000 {
++			compatible = "qcom,sm7250-dispcc";
++			reg = <0x0 0x0af00000 0x0 0x20000>;
++			clocks = <&rpmhcc RPMH_CXO_CLK>,
++				 <&rpmhcc RPMH_CXO_CLK_A>,
++				 <&gcc GCC_DISP_GPLL0_CLK_SRC>,
++				 <&sleep_clk>,
++				 <&mdss_dsi0_phy DSI_BYTE_PLL_CLK>,
++				 <&mdss_dsi0_phy DSI_PIXEL_PLL_CLK>,
++				 <0>,
++				 <0>,
++				 <0>,
++				 <0>;
++			power-domains = <&rpmhpd RPMHPD_CX>;
++			required-opps = <&rpmhpd_opp_low_svs>;
++			#clock-cells = <1>;
++			#reset-cells = <1>;
++			#power-domain-cells = <1>;
++		};
++
++		gpu: gpu@3d00000 {
++			compatible = "qcom,adreno-620.0", "qcom,adreno";
++			reg = <0x0 0x03d00000 0x0 0x40000>;
++			reg-names = "kgsl_3d0_reg_memory";
++
++			interrupts = <GIC_SPI 300 IRQ_TYPE_LEVEL_HIGH>;
++
++			iommus = <&adreno_smmu 0 0x401>;
++
++			operating-points-v2 = <&gpu_opp_table>;
++
++			qcom,gmu = <&gmu>;
++
++			#cooling-cells = <2>;
++
++			status = "disabled";
++
++			zap-shader {
++				memory-region = <&gpu_mem>;
++			};
++
++			gpu_opp_table: opp-table {
++				compatible = "operating-points-v2";
++
++				opp-625000000 {
++					opp-hz = /bits/ 64 <625000000>;
++					opp-level = <RPMH_REGULATOR_LEVEL_NOM>;
++				};
++
++				opp-500000000 {
++					opp-hz = /bits/ 64 <500000000>;
++					opp-level = <RPMH_REGULATOR_LEVEL_SVS_L1>;
++				};
++
++				opp-400000000 {
++					opp-hz = /bits/ 64 <400000000>;
++					opp-level = <RPMH_REGULATOR_LEVEL_SVS>;
++				};
++
++				opp-275000000 {
++					opp-hz = /bits/ 64 <275000000>;
++					opp-level = <RPMH_REGULATOR_LEVEL_LOW_SVS>;
++				};
++			};
++		};
++
++		gmu: gmu@3d6a000 {
++			compatible = "qcom,adreno-gmu-620.0", "qcom,adreno-gmu";
++			reg = <0x0 0x03d6a000 0x0 0x30000>,
++			      <0x0 0x03de0000 0x0 0x10000>,
++			      <0x0 0x0b290000 0x0 0x10000>,
++			      <0x0 0x0b490000 0x0 0x10000>;
++			reg-names = "gmu", "rscc", "gmu_pdc", "gmu_pdc_seq";
++
++			interrupts = <GIC_SPI 304 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 305 IRQ_TYPE_LEVEL_HIGH>;
++			interrupt-names = "hfi", "gmu";
++
++			clocks = <&gpucc GPU_CC_AHB_CLK>,
++				 <&gpucc GPU_CC_CX_GMU_CLK>,
++				 <&gpucc GPU_CC_CXO_CLK>,
++				 <&gcc GCC_DDRSS_GPU_AXI_CLK>,
++				 <&gcc GCC_GPU_MEMNOC_GFX_CLK>;
++			clock-names = "ahb", "gmu", "cxo", "axi", "memnoc";
++
++			power-domains = <&gpucc GPU_CX_GDSC>,
++					<&gpucc GPU_GX_GDSC>;
++			power-domain-names = "cx", "gx";
++
++			iommus = <&adreno_smmu 5 0x400>;
++
++			operating-points-v2 = <&gmu_opp_table>;
++
++			status = "disabled";
++
++			gmu_opp_table: opp-table {
++				compatible = "operating-points-v2";
++
++				opp-200000000 {
++					opp-hz = /bits/ 64 <200000000>;
++					opp-level = <RPMH_REGULATOR_LEVEL_LOW_SVS>;
++				};
++
++				opp-500000000 {
++					opp-hz = /bits/ 64 <500000000>;
++					opp-level = <RPMH_REGULATOR_LEVEL_SVS>;
++				};
++			};
++		};
++
++		gpucc: clock-controller@3d90000 {
++			compatible = "qcom,sm7250-gpucc";
++			reg = <0x0 0x03d90000 0x0 0x9000>;
++			clocks = <&rpmhcc RPMH_CXO_CLK>,
++				 <&gcc GCC_GPU_GPLL0_CLK_SRC>,
++				 <&gcc GCC_GPU_GPLL0_DIV_CLK_SRC>;
++			clock-names = "bi_tcxo",
++				      "gcc_gpu_gpll0_clk_src",
++				      "gcc_gpu_gpll0_div_clk_src";
++			#clock-cells = <1>;
++			#reset-cells = <1>;
++			#power-domain-cells = <1>;
++		};
++
++		adreno_smmu: iommu@3da0000 {
++			compatible = "qcom,sm7250-smmu-500", "qcom,adreno-smmu",
++				     "qcom,smmu-500", "arm,mmu-500";
++			reg = <0x0 0x03da0000 0x0 0x10000>;
++			#iommu-cells = <2>;
++			#global-interrupts = <1>;
++			interrupts = <GIC_SPI 673 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 678 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 679 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 680 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 681 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 682 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 683 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 684 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 685 IRQ_TYPE_LEVEL_HIGH>;
++			clocks = <&gpucc GPU_CC_AHB_CLK>,
++				 <&gcc GCC_GPU_MEMNOC_GFX_CLK>,
++				 <&gcc GCC_GPU_SNOC_DVM_GFX_CLK>;
++			clock-names = "ahb", "bus", "iface";
++
++			power-domains = <&gpucc GPU_CX_GDSC>;
++			dma-coherent;
++		};
++
++		intc: interrupt-controller@17a00000 {
++			compatible = "arm,gic-v3";
++			reg = <0x0 0x17a00000 0x0 0x10000>,     /* GICD */
++			      <0x0 0x17a60000 0x0 0x100000>;    /* GICR * 8 */
++			#interrupt-cells = <3>;
++			interrupt-controller;
++			interrupts = <GIC_PPI 8 IRQ_TYPE_LEVEL_HIGH>;
++		};
++
++		pdc: interrupt-controller@b220000 {
++			compatible = "qcom,sm7250-pdc", "qcom,pdc";
++			reg = <0 0xb220000 0 0x30000>, <0 0x17c000f0 0 0x60>;
++			qcom,pdc-ranges = <0 480 42>,
++					  <42 612 28>,
++					  <70 63 1>,
++					  <71 640 15>,
++					  <86 522 52>;
++			#interrupt-cells = <2>;
++			interrupt-parent = <&intc>;
++			interrupt-controller;
++		};
++
++		spmi_bus: spmi@c440000 {
++			compatible = "qcom,spmi-pmic-arb";
++			reg = <0x0 0x0c440000 0x0 0x0001100>,
++			      <0x0 0x0c600000 0x0 0x2000000>,
++			      <0x0 0x0e600000 0x0 0x0100000>,
++			      <0x0 0x0e700000 0x0 0x00a0000>,
++			      <0x0 0x0c40a000 0x0 0x0026000>;
++			reg-names = "core",
++				    "chnls",
++				    "obsrvr",
++				    "intr",
++				    "cnfg";
++			interrupt-names = "periph_irq";
++			interrupts-extended = <&pdc 1 IRQ_TYPE_LEVEL_HIGH>;
++			qcom,ee = <0>;
++			qcom,channel = <0>;
++			#address-cells = <2>;
++			#size-cells = <0>;
++			interrupt-controller;
++			#interrupt-cells = <4>;
++		};
++
++		apps_rsc: rsc@18200000 {
++			compatible = "qcom,rpmh-rsc";
++			reg = <0x0 0x18200000 0x0 0x10000>,
++			      <0x0 0x18210000 0x0 0x10000>,
++			      <0x0 0x18220000 0x0 0x10000>;
++			reg-names = "drv-0",
++				    "drv-1",
++				    "drv-2";
++			interrupts = <GIC_SPI 3 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 4 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 5 IRQ_TYPE_LEVEL_HIGH>;
++			label = "apps_rsc";
++			qcom,tcs-offset = <0xd00>;
++			qcom,drv-id = <2>;
++			qcom,tcs-config = <ACTIVE_TCS  2>, <SLEEP_TCS   3>,
++					  <WAKE_TCS    3>, <CONTROL_TCS 1>;
++			power-domains = <&cluster_pd>;
++
++			rpmhcc: clock-controller {
++				compatible = "qcom,sm7250-rpmh-clk";
++				#clock-cells = <1>;
++				clock-names = "xo";
++				clocks = <&xo_board>;
++			};
++
++			rpmhpd: power-controller {
++				compatible = "qcom,sm7250-rpmhpd";
++				#power-domain-cells = <1>;
++				operating-points-v2 = <&rpmhpd_opp_table>;
++
++				rpmhpd_opp_table: opp-table {
++					compatible = "operating-points-v2";
++
++					rpmhpd_opp_ret: opp1 {
++						opp-level = <RPMH_REGULATOR_LEVEL_RETENTION>;
++					};
++
++					rpmhpd_opp_min_svs: opp2 {
++						opp-level = <RPMH_REGULATOR_LEVEL_MIN_SVS>;
++					};
++
++					rpmhpd_opp_low_svs: opp3 {
++						opp-level = <RPMH_REGULATOR_LEVEL_LOW_SVS>;
++					};
++
++					rpmhpd_opp_svs: opp4 {
++						opp-level = <RPMH_REGULATOR_LEVEL_SVS>;
++					};
++
++					rpmhpd_opp_svs_l1: opp5 {
++						opp-level = <RPMH_REGULATOR_LEVEL_SVS_L1>;
++					};
++
++					rpmhpd_opp_nom: opp6 {
++						opp-level = <RPMH_REGULATOR_LEVEL_NOM>;
++					};
++
++					rpmhpd_opp_nom_l1: opp7 {
++						opp-level = <RPMH_REGULATOR_LEVEL_NOM_L1>;
++					};
++
++					rpmhpd_opp_nom_l2: opp8 {
++						opp-level = <RPMH_REGULATOR_LEVEL_NOM_L2>;
++					};
++
++					rpmhpd_opp_turbo: opp9 {
++						opp-level = <RPMH_REGULATOR_LEVEL_TURBO>;
++					};
++
++					rpmhpd_opp_turbo_l1: opp10 {
++						opp-level = <RPMH_REGULATOR_LEVEL_TURBO_L1>;
++					};
++				};
++			};
++
++			apps_bcm_voter: bcm-voter {
++				compatible = "qcom,bcm-voter";
++			};
++		};
++
++		cpufreq_hw: cpufreq@18323000 {
++			compatible = "qcom,sm7250-cpufreq-hw", "qcom,cpufreq-hw";
++			reg = <0 0x18323000 0 0x1000>,
++			      <0 0x18325800 0 0x1000>,
++			      <0 0x18327800 0 0x1000>;
++			reg-names = "freq-domain0",
++				    "freq-domain1",
++				    "freq-domain2";
++			clocks = <&rpmhcc RPMH_CXO_CLK>, <&gcc GPLL0>;
++			clock-names = "xo", "alternate";
++			#freq-domain-cells = <1>;
++			#clock-cells = <1>;
++		};
++
++		tcsr_mutex: hwlock@1f40000 {
++			compatible = "qcom,tcsr-mutex";
++			reg = <0x0 0x01f40000 0x0 0x40000>;
++			#hwlock-cells = <1>;
++		};
++
++		ufs_mem_hc: ufshc@1d84000 {
++			compatible = "qcom,sm7250-ufshc", "qcom,ufshc",
++				     "jedec,ufs-2.0";
++			reg = <0x0 0x01d84000 0x0 0x3000>;
++			interrupts = <GIC_SPI 265 IRQ_TYPE_LEVEL_HIGH>;
++			phys = <&ufs_mem_phy>;
++			phy-names = "ufsphy";
++			lanes-per-direction = <2>;
++			#reset-cells = <1>;
++			resets = <&gcc GCC_UFS_PHY_BCR>;
++			reset-names = "rst";
++
++			power-domains = <&gcc UFS_PHY_GDSC>;
++
++			/*
++			 * The downstream ufshc node has no "iommus": its
++			 * stream is left untranslated.
++			 */
++
++			pinctrl-names = "default",
++					"dev-reset-assert",
++					"dev-reset-deassert";
++			pinctrl-0 = <&ufs_dev_reset_deassert>;
++			pinctrl-1 = <&ufs_dev_reset_assert>;
++			pinctrl-2 = <&ufs_dev_reset_deassert>;
++
++			clock-names = "core_clk",
++				      "bus_aggr_clk",
++				      "iface_clk",
++				      "core_clk_unipro",
++				      "ref_clk",
++				      "tx_lane0_sync_clk",
++				      "rx_lane0_sync_clk",
++				      "rx_lane1_sync_clk";
++			clocks = <&gcc GCC_UFS_PHY_AXI_CLK>,
++				 <&gcc GCC_AGGRE_UFS_PHY_AXI_CLK>,
++				 <&gcc GCC_UFS_PHY_AHB_CLK>,
++				 <&gcc GCC_UFS_PHY_UNIPRO_CORE_CLK>,
++				 <&rpmhcc RPMH_CXO_CLK>,
++				 <&gcc GCC_UFS_PHY_TX_SYMBOL_0_CLK>,
++				 <&gcc GCC_UFS_PHY_RX_SYMBOL_0_CLK>,
++				 <&gcc GCC_UFS_PHY_RX_SYMBOL_1_CLK>;
++
++			operating-points-v2 = <&ufs_opp_table>;
++
++			status = "disabled";
++
++			ufs_opp_table: opp-table {
++				compatible = "operating-points-v2";
++
++				/* core_clk (AXI) and core_clk_unipro, downstream freq-table-hz */
++				opp-50000000 {
++					opp-hz = /bits/ 64 <50000000>,
++						 /bits/ 64 <0>,
++						 /bits/ 64 <0>,
++						 /bits/ 64 <37500000>,
++						 /bits/ 64 <0>,
++						 /bits/ 64 <0>,
++						 /bits/ 64 <0>,
++						 /bits/ 64 <0>;
++					required-opps = <&rpmhpd_opp_low_svs>;
++				};
++
++				opp-200000000 {
++					opp-hz = /bits/ 64 <200000000>,
++						 /bits/ 64 <0>,
++						 /bits/ 64 <0>,
++						 /bits/ 64 <150000000>,
++						 /bits/ 64 <0>,
++						 /bits/ 64 <0>,
++						 /bits/ 64 <0>,
++						 /bits/ 64 <0>;
++					required-opps = <&rpmhpd_opp_nom>;
++				};
++			};
++		};
++
++		ufs_mem_phy: phy@1d87000 {
++			compatible = "qcom,sm7250-qmp-ufs-phy";
++			reg = <0x0 0x01d87000 0x0 0xe00>;
++
++			clocks = <&rpmhcc RPMH_CXO_CLK>,
++				 <&gcc GCC_UFS_PHY_PHY_AUX_CLK>,
++				 <&gcc GCC_UFS_1X_CLKREF_CLK>;
++			clock-names = "ref",
++				      "ref_aux",
++				      "qref";
++
++			resets = <&ufs_mem_hc 0>;
++			reset-names = "ufsphy";
++
++			/*
++			 * The PHY rail is the RPMh resource "qphy.lvl". Nothing else
++			 * votes for it once the modem is up (it drops and the PLL
++			 * unlocks), so the PHY holds it. The UFS GDSC is held by
++			 * the host controller.
++			 */
++			power-domains = <&rpmhpd RPMHPD_QPHY>;
++
++			#phy-cells = <0>;
++
++			status = "disabled";
++		};
++
++		tlmm: pinctrl@f100000 {
++			compatible = "qcom,sm7250-tlmm";
++			/*
++			 * Tile names follow downstream pinctrl-lito
++			 * (SOUTH 0x100000, WEST 0x500000, EAST 0x900000
++			 * relative to 0xf000000).
++			 */
++			reg = <0x0 0x0f100000 0x0 0x300000>,
++			      <0x0 0x0f500000 0x0 0x300000>,
++			      <0x0 0x0f900000 0x0 0x300000>;
++			reg-names = "south", "west", "east";
++			interrupts = <GIC_SPI 208 IRQ_TYPE_LEVEL_HIGH>;
++			gpio-controller;
++			#gpio-cells = <2>;
++			interrupt-controller;
++			#interrupt-cells = <2>;
++			gpio-ranges = <&tlmm 0 0 146>;
++			wakeup-parent = <&pdc>;
++
++			qup_uart2_default: qup-uart2-default-state {
++				pins = "gpio36", "gpio37";
++				function = "qup02";
++				drive-strength = <2>;
++				bias-disable;
++			};
++
++			qup_i2c1_default: qup-i2c1-default-state {
++				pins = "gpio6", "gpio7";
++				function = "qup11";
++				drive-strength = <2>;
++				bias-disable;
++			};
++
++			qup_i2c9_default: qup-i2c9-default-state {
++				pins = "gpio46", "gpio47";
++				function = "qup13";
++				drive-strength = <2>;
++				bias-disable;
++			};
++
++			qup_i2c11_default: qup-i2c11-default-state {
++				pins = "gpio108", "gpio109";
++				function = "qup15";
++				drive-strength = <2>;
++				bias-disable;
++			};
++
++			/* UFS_RESET is a dedicated pad (not a GPIO); states as downstream */
++			ufs_dev_reset_assert: ufs-dev-reset-assert-state {
++				pins = "ufs_reset";
++				bias-pull-down;
++				drive-strength = <8>;
++				output-low;
++			};
++
++			ufs_dev_reset_deassert: ufs-dev-reset-deassert-state {
++				pins = "ufs_reset";
++				bias-pull-down;
++				drive-strength = <8>;
++				output-high;
++			};
++		};
++
++		/*
++		 * TSENS v2. Downstream: tsens@c222000 (tm c263000) 16 slots and
++		 * tsens@c223000 (tm c265000) 12 slots; PDC irqs 26/28 and 27/29
++		 * map to GIC SPI 506/508 and 507/509 via qcom,pdc-ranges.
++		 */
++		tsens0: thermal-sensor@c263000 {
++			compatible = "qcom,sm7250-tsens", "qcom,tsens-v2";
++			reg = <0x0 0x0c263000 0x0 0x1ff>, /* TM */
++			      <0x0 0x0c222000 0x0 0x1ff>; /* SROT */
++			#qcom,sensors = <16>;
++			interrupts = <GIC_SPI 506 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 508 IRQ_TYPE_LEVEL_HIGH>;
++			interrupt-names = "uplow", "critical";
++			#thermal-sensor-cells = <1>;
++		};
++
++		tsens1: thermal-sensor@c265000 {
++			compatible = "qcom,sm7250-tsens", "qcom,tsens-v2";
++			reg = <0x0 0x0c265000 0x0 0x1ff>, /* TM */
++			      <0x0 0x0c223000 0x0 0x1ff>; /* SROT */
++			#qcom,sensors = <12>;
++			interrupts = <GIC_SPI 507 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 509 IRQ_TYPE_LEVEL_HIGH>;
++			interrupt-names = "uplow", "critical";
++			#thermal-sensor-cells = <1>;
++		};
++
++		apps_smmu: iommu@15000000 {
++			compatible = "qcom,sm7250-smmu-500", "qcom,smmu-500", "arm,mmu-500";
++			reg = <0x0 0x15000000 0x0 0x100000>;
++			#iommu-cells = <2>;
++			#global-interrupts = <1>;
++			interrupts = <GIC_SPI 65 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 97 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 98 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 99 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 100 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 101 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 102 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 103 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 104 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 105 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 106 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 107 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 108 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 109 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 110 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 111 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 112 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 113 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 114 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 115 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 116 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 117 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 118 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 181 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 182 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 183 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 184 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 179 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 186 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 187 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 188 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 189 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 190 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 191 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 192 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 315 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 316 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 317 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 318 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 319 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 320 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 321 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 322 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 323 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 324 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 325 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 326 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 327 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 328 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 329 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 330 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 331 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 332 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 333 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 334 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 335 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 336 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 337 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 338 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 339 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 340 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 341 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 342 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 343 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 344 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 345 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 395 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 396 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 397 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 398 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 399 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 400 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 401 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 402 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 403 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 404 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 405 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 406 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 407 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 408 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 409 IRQ_TYPE_LEVEL_HIGH>;
++		};
++
++		watchdog@17c10000 {
++			compatible = "qcom,apss-wdt-sm7250", "qcom,kpss-wdt";
++			reg = <0x0 0x17c10000 0x0 0x1000>;
++			clocks = <&sleep_clk>;
++			interrupts = <GIC_SPI 0 IRQ_TYPE_EDGE_RISING>;
++		};
++
++		timer@17c20000 {
++			compatible = "arm,armv7-timer-mem";
++			#address-cells = <1>;
++			#size-cells = <1>;
++			ranges = <0 0 0 0x20000000>;
++			reg = <0x0 0x17c20000 0x0 0x1000>;
++
++			frame@17c21000 {
++				frame-number = <0>;
++				interrupts = <GIC_SPI 8 IRQ_TYPE_LEVEL_HIGH>,
++					     <GIC_SPI 6 IRQ_TYPE_LEVEL_HIGH>;
++				reg = <0x17c21000 0x1000>,
++				      <0x17c22000 0x1000>;
++			};
++
++			frame@17c23000 {
++				frame-number = <1>;
++				interrupts = <GIC_SPI 9 IRQ_TYPE_LEVEL_HIGH>;
++				reg = <0x17c23000 0x1000>;
++				status = "disabled";
++			};
++
++			frame@17c25000 {
++				frame-number = <2>;
++				interrupts = <GIC_SPI 10 IRQ_TYPE_LEVEL_HIGH>;
++				reg = <0x17c25000 0x1000>;
++				status = "disabled";
++			};
++
++			frame@17c27000 {
++				frame-number = <3>;
++				interrupts = <GIC_SPI 11 IRQ_TYPE_LEVEL_HIGH>;
++				reg = <0x17c27000 0x1000>;
++				status = "disabled";
++			};
++
++			frame@17c29000 {
++				frame-number = <4>;
++				interrupts = <GIC_SPI 12 IRQ_TYPE_LEVEL_HIGH>;
++				reg = <0x17c29000 0x1000>;
++				status = "disabled";
++			};
++
++			frame@17c2b000 {
++				frame-number = <5>;
++				interrupts = <GIC_SPI 13 IRQ_TYPE_LEVEL_HIGH>;
++				reg = <0x17c2b000 0x1000>;
++				status = "disabled";
++			};
++
++			frame@17c2d000 {
++				frame-number = <6>;
++				interrupts = <GIC_SPI 14 IRQ_TYPE_LEVEL_HIGH>;
++				reg = <0x17c2d000 0x1000>;
++				status = "disabled";
++			};
++		};
++
++		ipcc: mailbox@408000 {
++			compatible = "qcom,sm7250-ipcc", "qcom,ipcc";
++			reg = <0x0 0x00408000 0x0 0x1000>;
++			interrupts = <GIC_SPI 229 IRQ_TYPE_LEVEL_HIGH>;
++			interrupt-controller;
++			#interrupt-cells = <3>;
++			#mbox-cells = <2>;
++		};
++
++		aoss_qmp: power-management@c300000 {
++			compatible = "qcom,sm7150-aoss-qmp", "qcom,aoss-qmp";
++			reg = <0x0 0x0c300000 0x0 0x400>;
++			interrupts-extended = <&ipcc IPCC_CLIENT_AOP
++						     IPCC_MPROC_SIGNAL_GLINK_QMP
++						     IRQ_TYPE_EDGE_RISING>;
++			mboxes = <&ipcc IPCC_CLIENT_AOP
++					IPCC_MPROC_SIGNAL_GLINK_QMP>;
++
++			#clock-cells = <0>;
++		};
++
++		adsp: remoteproc@3000000 {
++			compatible = "qcom,sm7250-adsp-pas";
++			reg = <0x0 0x03000000 0x0 0x10000>;
++
++			interrupts-extended = <&pdc 16 IRQ_TYPE_EDGE_RISING>,
++					      <&smp2p_adsp_in 0 IRQ_TYPE_EDGE_RISING>,
++					      <&smp2p_adsp_in 1 IRQ_TYPE_EDGE_RISING>,
++					      <&smp2p_adsp_in 2 IRQ_TYPE_EDGE_RISING>,
++					      <&smp2p_adsp_in 3 IRQ_TYPE_EDGE_RISING>;
++			interrupt-names = "wdog", "fatal", "ready",
++					  "handover", "stop-ack";
++
++			clocks = <&rpmhcc RPMH_CXO_CLK>;
++			clock-names = "xo";
++
++			power-domains = <&rpmhpd RPMHPD_LCX>,
++					<&rpmhpd RPMHPD_LMX>;
++			power-domain-names = "lcx", "lmx";
++
++			memory-region = <&adsp_mem>;
++
++			qcom,qmp = <&aoss_qmp>;
++
++			qcom,smem-states = <&smp2p_adsp_out 0>;
++			qcom,smem-state-names = "stop";
++
++			status = "disabled";
++
++			glink-edge {
++				interrupts-extended = <&ipcc IPCC_CLIENT_LPASS
++							     IPCC_MPROC_SIGNAL_GLINK_QMP
++							     IRQ_TYPE_EDGE_RISING>;
++				mboxes = <&ipcc IPCC_CLIENT_LPASS
++						IPCC_MPROC_SIGNAL_GLINK_QMP>;
++
++				label = "lpass";
++				qcom,remote-pid = <2>;
++
++				fastrpc {
++					compatible = "qcom,fastrpc";
++					qcom,glink-channels = "fastrpcglink-apps-dsp";
++					label = "adsp";
++					qcom,non-secure-domain;
++					#address-cells = <1>;
++					#size-cells = <0>;
++
++					compute-cb@3 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <3>;
++						iommus = <&apps_smmu 0x1403 0x0>;
++					};
++
++					compute-cb@4 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <4>;
++						iommus = <&apps_smmu 0x1404 0x0>;
++					};
++
++					compute-cb@5 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <5>;
++						iommus = <&apps_smmu 0x1405 0x0>;
++						qcom,nsessions = <5>;
++					};
++				};
++
++				apr {
++					compatible = "qcom,apr-v2";
++					qcom,glink-channels = "apr_audio_svc";
++					qcom,domain = <APR_DOMAIN_ADSP>;
++					#address-cells = <1>;
++					#size-cells = <0>;
++
++					service@3 {
++						reg = <APR_SVC_ADSP_CORE>;
++						compatible = "qcom,q6core";
++						qcom,protection-domain = "avs/audio", "msm/adsp/audio_pd";
++					};
++
++					q6afe: service@4 {
++						compatible = "qcom,q6afe";
++						reg = <APR_SVC_AFE>;
++						qcom,protection-domain = "avs/audio", "msm/adsp/audio_pd";
++
++						q6afedai: dais {
++							compatible = "qcom,q6afe-dais";
++							#address-cells = <1>;
++							#size-cells = <0>;
++							#sound-dai-cells = <1>;
++						};
++
++						q6afecc: clock-controller {
++							compatible = "qcom,q6afe-clocks";
++							#clock-cells = <2>;
++						};
++					};
++
++					q6asm: service@7 {
++						compatible = "qcom,q6asm";
++						reg = <APR_SVC_ASM>;
++						qcom,protection-domain = "avs/audio", "msm/adsp/audio_pd";
++
++						q6asmdai: dais {
++							compatible = "qcom,q6asm-dais";
++							#address-cells = <1>;
++							#size-cells = <0>;
++							#sound-dai-cells = <1>;
++							/* downstream msm_audio_ion SID 0x1401 */
++							iommus = <&apps_smmu 0x1401 0x0>;
++						};
++					};
++
++					q6adm: service@8 {
++						compatible = "qcom,q6adm";
++						reg = <APR_SVC_ADM>;
++						qcom,protection-domain = "avs/audio", "msm/adsp/audio_pd";
++
++						q6routing: routing {
++							compatible = "qcom,q6adm-routing";
++							#sound-dai-cells = <0>;
++						};
++					};
++				};
++			};
++		};
++
++		mpss: remoteproc@4080000 {
++			compatible = "qcom,sm7250-mpss-pas";
++			reg = <0x0 0x04080000 0x0 0x10000>;
++
++			interrupts-extended = <&intc GIC_SPI 266 IRQ_TYPE_EDGE_RISING>,
++					      <&modem_smp2p_in 0 IRQ_TYPE_EDGE_RISING>,
++					      <&modem_smp2p_in 1 IRQ_TYPE_EDGE_RISING>,
++					      <&modem_smp2p_in 2 IRQ_TYPE_EDGE_RISING>,
++					      <&modem_smp2p_in 3 IRQ_TYPE_EDGE_RISING>,
++					      <&modem_smp2p_in 7 IRQ_TYPE_EDGE_RISING>;
++			interrupt-names = "wdog", "fatal", "ready", "handover",
++					  "stop-ack", "shutdown-ack";
++
++			clocks = <&rpmhcc RPMH_CXO_CLK>;
++			clock-names = "xo";
++
++			power-domains = <&rpmhpd RPMHPD_CX>,
++					<&rpmhpd RPMHPD_MSS>;
++			power-domain-names = "cx", "mss";
++
++			memory-region = <&modem_wlan_mem>;
++
++			qcom,qmp = <&aoss_qmp>;
++
++			qcom,smem-states = <&modem_smp2p_out 0>;
++			qcom,smem-state-names = "stop";
++
++			status = "disabled";
++
++			glink-edge {
++				interrupts-extended = <&ipcc IPCC_CLIENT_MPSS
++							     IPCC_MPROC_SIGNAL_GLINK_QMP
++							     IRQ_TYPE_EDGE_RISING>;
++				mboxes = <&ipcc IPCC_CLIENT_MPSS
++						IPCC_MPROC_SIGNAL_GLINK_QMP>;
++				label = "modem";
++				qcom,remote-pid = <1>;
++			};
++		};
++
++		wifi: wifi@18800000 {
++			compatible = "qcom,wcn3990-wifi";
++			reg = <0x0 0x18800000 0x0 0x800000>;
++			reg-names = "membase";
++			memory-region = <&wlan_fw_mem>;
++			interrupts = <GIC_SPI 132 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 81 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 415 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 416 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 417 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 86 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 94 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 96 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 82 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 119 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 120 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 87 IRQ_TYPE_LEVEL_HIGH>;
++			iommus = <&apps_smmu 0xc0 0x1>;
++			qcom,msa-fixed-perm;
++			status = "disabled";
++		};
++	};
++
++	sound: sound {
++	};
++
++	timer {
++		compatible = "arm,armv8-timer";
++		interrupts = <GIC_PPI 1 IRQ_TYPE_LEVEL_LOW>,
++			     <GIC_PPI 2 IRQ_TYPE_LEVEL_LOW>,
++			     <GIC_PPI 3 IRQ_TYPE_LEVEL_LOW>,
++			     <GIC_PPI 0 IRQ_TYPE_LEVEL_LOW>;
++	};
++
++	thermal-zones {
++		cpu0-thermal {
++			polling-delay-passive = <250>;
++			polling-delay = <1000>;
++			thermal-sensors = <&tsens0 1>;
++
++			trips {
++				cpu0_alert0: cpu0-alert0 {
++					temperature = <85000>;
++					hysteresis = <2000>;
++					type = "passive";
++				};
++
++				cpu0_alert1: cpu0-alert1 {
++					temperature = <95000>;
++					hysteresis = <2000>;
++					type = "passive";
++				};
++
++				cpu0_crit: cpu0-crit {
++					temperature = <115000>;
++					hysteresis = <1000>;
++					type = "critical";
++				};
++			};
++
++			cooling-maps {
++				map0 {
++					trip = <&cpu0_alert0>;
++					cooling-device = <&cpu0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu1 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu2 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu3 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu4 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu5 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
++				};
++
++				map1 {
++					trip = <&cpu0_alert1>;
++					cooling-device = <&cpu0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu1 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu2 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu3 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu4 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu5 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
++				};
++			};
++		};
++
++		cpu1-thermal {
++			polling-delay-passive = <250>;
++			polling-delay = <1000>;
++			thermal-sensors = <&tsens0 2>;
++
++			trips {
++				cpu1_alert0: cpu1-alert0 {
++					temperature = <85000>;
++					hysteresis = <2000>;
++					type = "passive";
++				};
++
++				cpu1_alert1: cpu1-alert1 {
++					temperature = <95000>;
++					hysteresis = <2000>;
++					type = "passive";
++				};
++
++				cpu1_crit: cpu1-crit {
++					temperature = <115000>;
++					hysteresis = <1000>;
++					type = "critical";
++				};
++			};
++
++			cooling-maps {
++				map0 {
++					trip = <&cpu1_alert0>;
++					cooling-device = <&cpu0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu1 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu2 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu3 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu4 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu5 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
++				};
++
++				map1 {
++					trip = <&cpu1_alert1>;
++					cooling-device = <&cpu0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu1 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu2 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu3 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu4 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu5 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
++				};
++			};
++		};
++
++		cpu2-thermal {
++			polling-delay-passive = <250>;
++			polling-delay = <1000>;
++			thermal-sensors = <&tsens0 3>;
++
++			trips {
++				cpu2_alert0: cpu2-alert0 {
++					temperature = <85000>;
++					hysteresis = <2000>;
++					type = "passive";
++				};
++
++				cpu2_alert1: cpu2-alert1 {
++					temperature = <95000>;
++					hysteresis = <2000>;
++					type = "passive";
++				};
++
++				cpu2_crit: cpu2-crit {
++					temperature = <115000>;
++					hysteresis = <1000>;
++					type = "critical";
++				};
++			};
++
++			cooling-maps {
++				map0 {
++					trip = <&cpu2_alert0>;
++					cooling-device = <&cpu0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu1 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu2 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu3 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu4 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu5 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
++				};
++
++				map1 {
++					trip = <&cpu2_alert1>;
++					cooling-device = <&cpu0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu1 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu2 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu3 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu4 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu5 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
++				};
++			};
++		};
++
++		cpu3-thermal {
++			polling-delay-passive = <250>;
++			polling-delay = <1000>;
++			thermal-sensors = <&tsens0 4>;
++
++			trips {
++				cpu3_alert0: cpu3-alert0 {
++					temperature = <85000>;
++					hysteresis = <2000>;
++					type = "passive";
++				};
++
++				cpu3_alert1: cpu3-alert1 {
++					temperature = <95000>;
++					hysteresis = <2000>;
++					type = "passive";
++				};
++
++				cpu3_crit: cpu3-crit {
++					temperature = <115000>;
++					hysteresis = <1000>;
++					type = "critical";
++				};
++			};
++
++			cooling-maps {
++				map0 {
++					trip = <&cpu3_alert0>;
++					cooling-device = <&cpu0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu1 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu2 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu3 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu4 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu5 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
++				};
++
++				map1 {
++					trip = <&cpu3_alert1>;
++					cooling-device = <&cpu0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu1 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu2 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu3 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu4 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu5 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
++				};
++			};
++		};
++
++		cpu4-thermal {
++			polling-delay-passive = <250>;
++			polling-delay = <1000>;
++			thermal-sensors = <&tsens0 5>;
++
++			trips {
++				cpu4_alert0: cpu4-alert0 {
++					temperature = <85000>;
++					hysteresis = <2000>;
++					type = "passive";
++				};
++
++				cpu4_alert1: cpu4-alert1 {
++					temperature = <95000>;
++					hysteresis = <2000>;
++					type = "passive";
++				};
++
++				cpu4_crit: cpu4-crit {
++					temperature = <115000>;
++					hysteresis = <1000>;
++					type = "critical";
++				};
++			};
++
++			cooling-maps {
++				map0 {
++					trip = <&cpu4_alert0>;
++					cooling-device = <&cpu0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu1 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu2 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu3 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu4 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu5 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
++				};
++
++				map1 {
++					trip = <&cpu4_alert1>;
++					cooling-device = <&cpu0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu1 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu2 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu3 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu4 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu5 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
++				};
++			};
++		};
++
++		cpu5-thermal {
++			polling-delay-passive = <250>;
++			polling-delay = <1000>;
++			thermal-sensors = <&tsens0 6>;
++
++			trips {
++				cpu5_alert0: cpu5-alert0 {
++					temperature = <85000>;
++					hysteresis = <2000>;
++					type = "passive";
++				};
++
++				cpu5_alert1: cpu5-alert1 {
++					temperature = <95000>;
++					hysteresis = <2000>;
++					type = "passive";
++				};
++
++				cpu5_crit: cpu5-crit {
++					temperature = <115000>;
++					hysteresis = <1000>;
++					type = "critical";
++				};
++			};
++
++			cooling-maps {
++				map0 {
++					trip = <&cpu5_alert0>;
++					cooling-device = <&cpu0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu1 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu2 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu3 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu4 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu5 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
++				};
++
++				map1 {
++					trip = <&cpu5_alert1>;
++					cooling-device = <&cpu0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu1 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu2 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu3 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu4 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++						 <&cpu5 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
++				};
++			};
++		};
++
++		cpuss0-thermal {
++			polling-delay-passive = <0>;
++			polling-delay = <1000>;
++			thermal-sensors = <&tsens0 7>;
++
++			trips {
++				cpuss0-critical {
++					temperature = <115000>;
++					hysteresis = <1000>;
++					type = "critical";
++				};
++			};
++		};
++
++		cpuss1-thermal {
++			polling-delay-passive = <0>;
++			polling-delay = <1000>;
++			thermal-sensors = <&tsens0 8>;
++
++			trips {
++				cpuss1-critical {
++					temperature = <115000>;
++					hysteresis = <1000>;
++					type = "critical";
++				};
++			};
++		};
++
++		cpu6a-thermal {
++			polling-delay-passive = <250>;
++			polling-delay = <1000>;
++			thermal-sensors = <&tsens0 9>;
++
++			trips {
++				cpu6a_alert0: cpu6a-alert0 {
++					temperature = <85000>;
++					hysteresis = <2000>;
++					type = "passive";
++				};
++
++				cpu6a_alert1: cpu6a-alert1 {
++					temperature = <95000>;
++					hysteresis = <2000>;
++					type = "passive";
++				};
++
++				cpu6a_crit: cpu6a-crit {
++					temperature = <115000>;
++					hysteresis = <1000>;
++					type = "critical";
++				};
++			};
++
++			cooling-maps {
++				map0 {
++					trip = <&cpu6a_alert0>;
++					cooling-device = <&cpu6 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
++				};
++
++				map1 {
++					trip = <&cpu6a_alert1>;
++					cooling-device = <&cpu6 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
++				};
++			};
++		};
++
++		cpu7a-thermal {
++			polling-delay-passive = <250>;
++			polling-delay = <1000>;
++			thermal-sensors = <&tsens0 10>;
++
++			trips {
++				cpu7a_alert0: cpu7a-alert0 {
++					temperature = <85000>;
++					hysteresis = <2000>;
++					type = "passive";
++				};
++
++				cpu7a_alert1: cpu7a-alert1 {
++					temperature = <95000>;
++					hysteresis = <2000>;
++					type = "passive";
++				};
++
++				cpu7a_crit: cpu7a-crit {
++					temperature = <115000>;
++					hysteresis = <1000>;
++					type = "critical";
++				};
++			};
++
++			cooling-maps {
++				map0 {
++					trip = <&cpu7a_alert0>;
++					cooling-device = <&cpu7 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
++				};
++
++				map1 {
++					trip = <&cpu7a_alert1>;
++					cooling-device = <&cpu7 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
++				};
++			};
++		};
++
++		cpu6b-thermal {
++			polling-delay-passive = <250>;
++			polling-delay = <1000>;
++			thermal-sensors = <&tsens0 11>;
++
++			trips {
++				cpu6b_alert0: cpu6b-alert0 {
++					temperature = <85000>;
++					hysteresis = <2000>;
++					type = "passive";
++				};
++
++				cpu6b_alert1: cpu6b-alert1 {
++					temperature = <95000>;
++					hysteresis = <2000>;
++					type = "passive";
++				};
++
++				cpu6b_crit: cpu6b-crit {
++					temperature = <115000>;
++					hysteresis = <1000>;
++					type = "critical";
++				};
++			};
++
++			cooling-maps {
++				map0 {
++					trip = <&cpu6b_alert0>;
++					cooling-device = <&cpu6 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
++				};
++
++				map1 {
++					trip = <&cpu6b_alert1>;
++					cooling-device = <&cpu6 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
++				};
++			};
++		};
++
++		cpu7b-thermal {
++			polling-delay-passive = <250>;
++			polling-delay = <1000>;
++			thermal-sensors = <&tsens0 12>;
++
++			trips {
++				cpu7b_alert0: cpu7b-alert0 {
++					temperature = <85000>;
++					hysteresis = <2000>;
++					type = "passive";
++				};
++
++				cpu7b_alert1: cpu7b-alert1 {
++					temperature = <95000>;
++					hysteresis = <2000>;
++					type = "passive";
++				};
++
++				cpu7b_crit: cpu7b-crit {
++					temperature = <115000>;
++					hysteresis = <1000>;
++					type = "critical";
++				};
++			};
++
++			cooling-maps {
++				map0 {
++					trip = <&cpu7b_alert0>;
++					cooling-device = <&cpu7 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
++				};
++
++				map1 {
++					trip = <&cpu7b_alert1>;
++					cooling-device = <&cpu7 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
++				};
++			};
++		};
++
++		gpuss0-thermal {
++			polling-delay-passive = <0>;
++			polling-delay = <1000>;
++			thermal-sensors = <&tsens0 13>;
++
++			trips {
++				gpuss0-critical {
++					temperature = <115000>;
++					hysteresis = <1000>;
++					type = "critical";
++				};
++			};
++		};
++
++		gpuss1-thermal {
++			polling-delay-passive = <0>;
++			polling-delay = <1000>;
++			thermal-sensors = <&tsens0 14>;
++
++			trips {
++				gpuss1-critical {
++					temperature = <115000>;
++					hysteresis = <1000>;
++					type = "critical";
++				};
++			};
++		};
++
++		aoss0-thermal {
++			polling-delay-passive = <0>;
++			polling-delay = <1000>;
++			thermal-sensors = <&tsens0 0>;
++
++			trips {
++				aoss0-hot {
++					temperature = <115000>;
++					hysteresis = <1000>;
++					type = "hot";
++				};
++			};
++		};
++
++		aoss1-thermal {
++			polling-delay-passive = <0>;
++			polling-delay = <1000>;
++			thermal-sensors = <&tsens1 0>;
++
++			trips {
++				aoss1-hot {
++					temperature = <115000>;
++					hysteresis = <1000>;
++					type = "hot";
++				};
++			};
++		};
++
++		cwlan-thermal {
++			polling-delay-passive = <0>;
++			polling-delay = <1000>;
++			thermal-sensors = <&tsens1 1>;
++
++			trips {
++				cwlan-hot {
++					temperature = <115000>;
++					hysteresis = <1000>;
++					type = "hot";
++				};
++			};
++		};
++
++		video-thermal {
++			polling-delay-passive = <0>;
++			polling-delay = <1000>;
++			thermal-sensors = <&tsens1 2>;
++
++			trips {
++				video-hot {
++					temperature = <115000>;
++					hysteresis = <1000>;
++					type = "hot";
++				};
++			};
++		};
++
++		ddr-thermal {
++			polling-delay-passive = <0>;
++			polling-delay = <1000>;
++			thermal-sensors = <&tsens1 3>;
++
++			trips {
++				ddr-hot {
++					temperature = <115000>;
++					hysteresis = <1000>;
++					type = "hot";
++				};
++			};
++		};
++
++		q6-hvx-thermal {
++			polling-delay-passive = <0>;
++			polling-delay = <1000>;
++			thermal-sensors = <&tsens1 4>;
++
++			trips {
++				q6-hvx-hot {
++					temperature = <115000>;
++					hysteresis = <1000>;
++					type = "hot";
++				};
++			};
++		};
++
++		cmpss-thermal {
++			polling-delay-passive = <0>;
++			polling-delay = <1000>;
++			thermal-sensors = <&tsens1 5>;
++
++			trips {
++				cmpss-hot {
++					temperature = <115000>;
++					hysteresis = <1000>;
++					type = "hot";
++				};
++			};
++		};
++
++		npu-thermal {
++			polling-delay-passive = <0>;
++			polling-delay = <1000>;
++			thermal-sensors = <&tsens1 6>;
++
++			trips {
++				npu-hot {
++					temperature = <115000>;
++					hysteresis = <1000>;
++					type = "hot";
++				};
++			};
++		};
++
++		camera-thermal {
++			polling-delay-passive = <0>;
++			polling-delay = <1000>;
++			thermal-sensors = <&tsens1 7>;
++
++			trips {
++				camera-hot {
++					temperature = <115000>;
++					hysteresis = <1000>;
++					type = "hot";
++				};
++			};
++		};
++
++		mdm-vec-thermal {
++			polling-delay-passive = <0>;
++			polling-delay = <1000>;
++			thermal-sensors = <&tsens1 8>;
++
++			trips {
++				mdm-vec-hot {
++					temperature = <115000>;
++					hysteresis = <1000>;
++					type = "hot";
++				};
++			};
++		};
++
++		mdm-scl-thermal {
++			polling-delay-passive = <0>;
++			polling-delay = <1000>;
++			thermal-sensors = <&tsens1 9>;
++
++			trips {
++				mdm-scl-hot {
++					temperature = <115000>;
++					hysteresis = <1000>;
++					type = "hot";
++				};
++			};
++		};
++
++		mdm-core0-thermal {
++			polling-delay-passive = <0>;
++			polling-delay = <1000>;
++			thermal-sensors = <&tsens1 10>;
++
++			trips {
++				mdm-core0-hot {
++					temperature = <115000>;
++					hysteresis = <1000>;
++					type = "hot";
++				};
++			};
++		};
++
++		mdm-core1-thermal {
++			polling-delay-passive = <0>;
++			polling-delay = <1000>;
++			thermal-sensors = <&tsens1 11>;
++
++			trips {
++				mdm-core1-hot {
++					temperature = <115000>;
++					hysteresis = <1000>;
++					type = "hot";
++				};
++			};
++		};
++	};
++};

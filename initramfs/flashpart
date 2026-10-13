@@ -1,0 +1,26 @@
+#!/bin/sh
+# flashpart <partition-name> <url> <sha256>
+# Download an image and write it to a GPT partition by name, then read it back and verify.
+# Refuses anything but the kernel slots we manage.
+set -e
+PART=$1; URL=$2; SUM=$3
+case "$PART" in
+	boot_a|boot_b|recovery_a|recovery_b) ;;
+	*) echo "flashpart: refusing to write '$PART'"; exit 1 ;;
+esac
+DEV=
+for d in /sys/class/block/sd*; do
+	if grep -qs "^PARTNAME=$PART\$" "$d/uevent"; then DEV=/dev/$(basename "$d"); fi
+done
+[ -n "$DEV" ] || { echo "flashpart: partition $PART not found"; exit 1; }
+wget -q -O /tmp/flash.img "$URL"
+SIZE=$(stat -c %s /tmp/flash.img)
+[ "$(sha256sum < /tmp/flash.img | cut -d' ' -f1)" = "$SUM" ] || { echo "flashpart: download checksum mismatch"; exit 1; }
+[ "$SIZE" -le $(($(cat /sys/class/block/$(basename "$DEV")/size) * 512)) ] || { echo "flashpart: image larger than $PART"; exit 1; }
+dd if=/tmp/flash.img of="$DEV" bs=1M conv=fsync 2>/dev/null
+sync
+echo 3 > /proc/sys/vm/drop_caches
+BACK=$(head -c "$SIZE" "$DEV" | sha256sum | cut -d' ' -f1)
+rm -f /tmp/flash.img
+[ "$BACK" = "$SUM" ] || { echo "flashpart: READBACK MISMATCH on $DEV"; exit 1; }
+echo "flashpart: $PART ($DEV) written and verified, $SIZE bytes"

@@ -1,0 +1,1092 @@
+Subject: drm: SM7250 display, Samsung AMS644VK04 panel, Adreno 620
+
+Combined diff of the following commits (base v7.3-rc7):
+
+  - drm/msm/dpu: Add SM7250 (DPU 6.1.0) catalog, mdss and UBWC data
+  - drm/panel: Add Samsung AMS644VK04 DSC command mode panel driver
+  - drm/msm/adreno: add Adreno 620 (0x06020000) catalog entry
+  - drm/msm/a6xx: add the a620 bandwidth table for the GMU
+  - drm/msm/a6xx: program the PDC sequencer on a620
+
+---
+ drivers/gpu/drm/msm/adreno/a6xx_catalog.c              |  20 ++
+ drivers/gpu/drm/msm/adreno/a6xx_gmu.c                  |  22 +-
+ drivers/gpu/drm/msm/adreno/a6xx_hfi.c                  |  33 +++
+ drivers/gpu/drm/msm/adreno/adreno_gpu.h                |   5 +
+ drivers/gpu/drm/msm/disp/dpu1/catalog/dpu_6_1_sm7250.h | 343 +++++++++++++++++++++++++++
+ drivers/gpu/drm/msm/disp/dpu1/dpu_hw_catalog.c         |   1 +
+ drivers/gpu/drm/msm/disp/dpu1/dpu_hw_catalog.h         |   1 +
+ drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c                |   1 +
+ drivers/gpu/drm/msm/msm_mdss.c                         |   1 +
+ drivers/gpu/drm/panel/Kconfig                          |  12 +
+ drivers/gpu/drm/panel/Makefile                         |   1 +
+ drivers/gpu/drm/panel/panel-samsung-ams644vk04.c       | 472 +++++++++++++++++++++++++++++++++++++
+ 12 files changed, 906 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/gpu/drm/msm/adreno/a6xx_catalog.c b/drivers/gpu/drm/msm/adreno/a6xx_catalog.c
+index 90a0c7ffb..dcaa3195d 100644
+--- a/drivers/gpu/drm/msm/adreno/a6xx_catalog.c
++++ b/drivers/gpu/drm/msm/adreno/a6xx_catalog.c
+@@ -885,6 +885,26 @@ static const struct adreno_info a6xx_gpus[] = {
+ 			{ 169, 2 },
+ 			{ 180, 1 },
+ 		),
++	}, {
++		.chip_ids = ADRENO_CHIP_IDS(0x06020000),
++		.family = ADRENO_6XX_GEN3,
++		.fw = {
++			[ADRENO_FW_SQE] = "a650_sqe.fw",
++			[ADRENO_FW_GMU] = "a650_gmu.bin",
++		},
++		.gmem = SZ_512K,
++		.inactive_period = DRM_MSM_INACTIVE_PERIOD,
++		.quirks = ADRENO_QUIRK_HAS_CACHED_COHERENT |
++			  ADRENO_QUIRK_HAS_HW_APRIV,
++		.funcs = &a6xx_gpu_funcs,
++		.zapfw = "a620_zap.mbn",
++		.a6xx = &(const struct a6xx_info) {
++			.hwcg = a620_hwcg,
++			.protect = &a650_protect,
++			.gbif_cx = a640_gbif,
++			.gmu_cgc_mode = 0x00020200,
++			.prim_fifo_threshold = 0x00010000,
++		},
+ 	}, {
+ 		.chip_ids = ADRENO_CHIP_IDS(0x06020100),
+ 		.family = ADRENO_6XX_GEN3,
+diff --git a/drivers/gpu/drm/msm/adreno/a6xx_gmu.c b/drivers/gpu/drm/msm/adreno/a6xx_gmu.c
+index 6d49c51df..c7485c9b0 100644
+--- a/drivers/gpu/drm/msm/adreno/a6xx_gmu.c
++++ b/drivers/gpu/drm/msm/adreno/a6xx_gmu.c
+@@ -673,6 +673,7 @@ static void a6xx_gmu_rpmh_init(struct a6xx_gmu *gmu)
+ 	u32 seqmem0_drv0_reg = REG_A6XX_RSCC_SEQ_MEM_0_DRV0;
+ 	void __iomem *seqptr = NULL;
+ 	uint32_t pdc_address_offset;
++	u32 mx_addr = 0x30010, cx_addr = 0x30000;
+ 	void __iomem *pdcptr;
+ 	bool pdc_in_aop = false;
+ 
+@@ -684,8 +685,17 @@ static void a6xx_gmu_rpmh_init(struct a6xx_gmu *gmu)
+ 	if (IS_ERR(pdcptr))
+ 		return;
+ 
+-	if (adreno_is_a650_family(adreno_gpu) ||
+-	    adreno_is_a7xx(adreno_gpu))
++	/* Unlike the rest of the A650 family, A620 has no PDC setup from AOP */
++	if (adreno_is_a620(adreno_gpu)) {
++		pdc_address_offset = cmd_db_read_addr("xo.lvl");
++		mx_addr = cmd_db_read_addr("mx.lvl");
++		cx_addr = cmd_db_read_addr("cx.lvl");
++		if (!pdc_address_offset || !mx_addr || !cx_addr) {
++			DRM_DEV_ERROR(gmu->dev, "No PDC resource addresses in cmd-db\n");
++			return;
++		}
++	} else if (adreno_is_a650_family(adreno_gpu) ||
++		 adreno_is_a7xx(adreno_gpu))
+ 		pdc_in_aop = true;
+ 	else if (adreno_is_a618(adreno_gpu) || adreno_is_a640_family(adreno_gpu))
+ 		pdc_address_offset = 0x30090;
+@@ -753,10 +763,10 @@ static void a6xx_gmu_rpmh_init(struct a6xx_gmu *gmu)
+ 	pdc_write(pdcptr, REG_A6XX_PDC_GPU_TCS1_CMD_WAIT_FOR_CMPL_BANK, 0);
+ 	pdc_write(pdcptr, REG_A6XX_PDC_GPU_TCS1_CONTROL, 0);
+ 	pdc_write(pdcptr, REG_A6XX_PDC_GPU_TCS1_CMD0_MSGID, 0x10108);
+-	pdc_write(pdcptr, REG_A6XX_PDC_GPU_TCS1_CMD0_ADDR, 0x30010);
++	pdc_write(pdcptr, REG_A6XX_PDC_GPU_TCS1_CMD0_ADDR, mx_addr);
+ 	pdc_write(pdcptr, REG_A6XX_PDC_GPU_TCS1_CMD0_DATA, 1);
+ 	pdc_write(pdcptr, REG_A6XX_PDC_GPU_TCS1_CMD0_MSGID + 4, 0x10108);
+-	pdc_write(pdcptr, REG_A6XX_PDC_GPU_TCS1_CMD0_ADDR + 4, 0x30000);
++	pdc_write(pdcptr, REG_A6XX_PDC_GPU_TCS1_CMD0_ADDR + 4, cx_addr);
+ 	pdc_write(pdcptr, REG_A6XX_PDC_GPU_TCS1_CMD0_DATA + 4, 0x0);
+ 
+ 	pdc_write(pdcptr, REG_A6XX_PDC_GPU_TCS1_CMD0_MSGID + 8, 0x10108);
+@@ -767,11 +777,11 @@ static void a6xx_gmu_rpmh_init(struct a6xx_gmu *gmu)
+ 	pdc_write(pdcptr, REG_A6XX_PDC_GPU_TCS3_CMD_WAIT_FOR_CMPL_BANK, 0);
+ 	pdc_write(pdcptr, REG_A6XX_PDC_GPU_TCS3_CONTROL, 0);
+ 	pdc_write(pdcptr, REG_A6XX_PDC_GPU_TCS3_CMD0_MSGID, 0x10108);
+-	pdc_write(pdcptr, REG_A6XX_PDC_GPU_TCS3_CMD0_ADDR, 0x30010);
++	pdc_write(pdcptr, REG_A6XX_PDC_GPU_TCS3_CMD0_ADDR, mx_addr);
+ 	pdc_write(pdcptr, REG_A6XX_PDC_GPU_TCS3_CMD0_DATA, 2);
+ 
+ 	pdc_write(pdcptr, REG_A6XX_PDC_GPU_TCS3_CMD0_MSGID + 4, 0x10108);
+-	pdc_write(pdcptr, REG_A6XX_PDC_GPU_TCS3_CMD0_ADDR + 4, 0x30000);
++	pdc_write(pdcptr, REG_A6XX_PDC_GPU_TCS3_CMD0_ADDR + 4, cx_addr);
+ 	if (adreno_is_a618(adreno_gpu) || adreno_is_a619(adreno_gpu) ||
+ 			adreno_is_a650_family(adreno_gpu))
+ 		pdc_write(pdcptr, REG_A6XX_PDC_GPU_TCS3_CMD0_DATA + 4, 0x2);
+diff --git a/drivers/gpu/drm/msm/adreno/a6xx_hfi.c b/drivers/gpu/drm/msm/adreno/a6xx_hfi.c
+index 186a73c0b..1acab800a 100644
+--- a/drivers/gpu/drm/msm/adreno/a6xx_hfi.c
++++ b/drivers/gpu/drm/msm/adreno/a6xx_hfi.c
+@@ -553,6 +553,37 @@ static void a650_build_bw_table(struct a6xx_hfi_msg_bw_table *msg)
+ 	msg->cnoc_cmds_data[1][0] =  0x60000001;
+ }
+ 
++static void a620_build_bw_table(struct a6xx_hfi_msg_bw_table *msg)
++{
++	/*
++	 * Send a single "off" entry just to get things running
++	 * TODO: bus scaling
++	 */
++	msg->bw_level_num = 1;
++
++	msg->ddr_cmds_num = 3;
++	msg->ddr_wait_bitmask = 0x01;
++
++	msg->ddr_cmds_addrs[0] = cmd_db_read_addr("MC0");
++	msg->ddr_cmds_addrs[1] = cmd_db_read_addr("SH0");
++	msg->ddr_cmds_addrs[2] = cmd_db_read_addr("ACV");
++
++	msg->ddr_cmds_data[0][0] =  0x40000000;
++	msg->ddr_cmds_data[0][1] =  0x40000000;
++	msg->ddr_cmds_data[0][2] =  0x40000000;
++
++	/*
++	 * These are the CX (CNOC) votes - these are used by the GMU but the
++	 * votes are known and fixed for the target
++	 */
++	msg->cnoc_cmds_num = 1;
++	msg->cnoc_wait_bitmask = 0x01;
++
++	msg->cnoc_cmds_addrs[0] = cmd_db_read_addr("CN0");
++	msg->cnoc_cmds_data[0][0] =  0x40000000;
++	msg->cnoc_cmds_data[1][0] =  0x60000001;
++}
++
+ static void a690_build_bw_table(struct a6xx_hfi_msg_bw_table *msg)
+ {
+ 	/*
+@@ -818,6 +849,8 @@ static int a6xx_hfi_send_bw_table(struct a6xx_gmu *gmu)
+ 		a619_build_bw_table(msg);
+ 	else if (adreno_is_a640_family(adreno_gpu))
+ 		a640_build_bw_table(msg);
++	else if (adreno_is_a620(adreno_gpu))
++		a620_build_bw_table(msg);
+ 	else if (adreno_is_a650(adreno_gpu))
+ 		a650_build_bw_table(msg);
+ 	else if (adreno_is_7c3(adreno_gpu))
+diff --git a/drivers/gpu/drm/msm/adreno/adreno_gpu.h b/drivers/gpu/drm/msm/adreno/adreno_gpu.h
+index 114a40f79..8748ca63b 100644
+--- a/drivers/gpu/drm/msm/adreno/adreno_gpu.h
++++ b/drivers/gpu/drm/msm/adreno/adreno_gpu.h
+@@ -441,6 +441,11 @@ static inline int adreno_is_a619_holi(const struct adreno_gpu *gpu)
+ 	return adreno_is_a619(gpu) && adreno_has_gmu_wrapper(gpu);
+ }
+ 
++static inline int adreno_is_a620(const struct adreno_gpu *gpu)
++{
++	return gpu->info->chip_ids[0] == 0x06020000;
++}
++
+ static inline int adreno_is_a621(const struct adreno_gpu *gpu)
+ {
+ 	return gpu->info->chip_ids[0] == 0x06020100;
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/catalog/dpu_6_1_sm7250.h b/drivers/gpu/drm/msm/disp/dpu1/catalog/dpu_6_1_sm7250.h
+new file mode 100644
+index 000000000..58543e629
+--- /dev/null
++++ b/drivers/gpu/drm/msm/disp/dpu1/catalog/dpu_6_1_sm7250.h
+@@ -0,0 +1,343 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * Copyright (c) 2022. Qualcomm Innovation Center, Inc. All rights reserved.
++ * Copyright (c) 2015-2018, 2020 The Linux Foundation. All rights reserved.
++ *
++ * SM7250 ("lito"), SDE hardware revision 6.1.0 (SDE_HW_VER_610 downstream).
++ *
++ * Block offsets are the downstream lito-sde.dtsi values minus the 0x1000
++ * "qcom,sde-off", i.e. relative to the "mdp" register region at 0xae01000.
++ * Layout is the same as dpu_5_2_sm7150.h with the 6.x interrupt/CTL scheme
++ * of dpu_6_0_sm8250.h.
++ */
++
++#ifndef _DPU_6_1_SM7250_H
++#define _DPU_6_1_SM7250_H
++
++static const struct dpu_caps sm7250_dpu_caps = {
++	.max_mixer_width = DEFAULT_DPU_OUTPUT_LINE_WIDTH,	/* sde-mixer-linewidth 2560 */
++	.max_mixer_blendstages = 0x9,				/* sde-mixer-blendstages */
++	.has_src_split = true,					/* sde-has-src-split */
++	.has_dim_layer = true,					/* sde-has-dim-layer */
++	.has_idle_pc = true,					/* sde-has-idle-pc */
++	.has_3d_merge = true,					/* sde-merge-3d-off */
++	.max_linewidth = 2880,					/* sde-sspp-linewidth */
++	.pixel_ram_size = DEFAULT_PIXEL_RAM_SIZE,
++	.max_hdeci_exp = MAX_HORZ_DECIMATION,
++	.max_vdeci_exp = MAX_VERT_DECIMATION,
++};
++
++static const struct dpu_mdp_cfg sm7250_mdp = {
++	.name = "top_0",
++	.base = 0x0, .len = 0x494,				/* sde-len */
++	.clk_ctrls = {
++		/* sde-sspp-clk-ctrl and sde-wb-clk-ctrl / sde-reg-dma-clk-ctrl */
++		[DPU_CLK_CTRL_VIG0] = { .reg_off = 0x2ac, .bit_off = 0 },
++		[DPU_CLK_CTRL_VIG1] = { .reg_off = 0x2b4, .bit_off = 0 },
++		[DPU_CLK_CTRL_DMA0] = { .reg_off = 0x2ac, .bit_off = 8 },
++		[DPU_CLK_CTRL_DMA1] = { .reg_off = 0x2b4, .bit_off = 8 },
++		[DPU_CLK_CTRL_DMA2] = { .reg_off = 0x2c4, .bit_off = 8 },
++		[DPU_CLK_CTRL_REG_DMA] = { .reg_off = 0x2bc, .bit_off = 20 },
++		[DPU_CLK_CTRL_WB2] = { .reg_off = 0x2bc, .bit_off = 16 },
++	},
++};
++
++/* sde-ctl-off 0x2000 0x2200 0x2400 0x2600, sde-ctl-size 0x1dc */
++static const struct dpu_ctl_cfg sm7250_ctl[] = {
++	{
++		.name = "ctl_0", .id = CTL_0,
++		.base = 0x1000, .len = 0x1dc,
++		.intr_start = DPU_IRQ_IDX(MDP_SSPP_TOP0_INTR2, 9),
++	}, {
++		.name = "ctl_1", .id = CTL_1,
++		.base = 0x1200, .len = 0x1dc,
++		.intr_start = DPU_IRQ_IDX(MDP_SSPP_TOP0_INTR2, 10),
++	}, {
++		.name = "ctl_2", .id = CTL_2,
++		.base = 0x1400, .len = 0x1dc,
++		.intr_start = DPU_IRQ_IDX(MDP_SSPP_TOP0_INTR2, 11),
++	}, {
++		.name = "ctl_3", .id = CTL_3,
++		.base = 0x1600, .len = 0x1dc,
++		.intr_start = DPU_IRQ_IDX(MDP_SSPP_TOP0_INTR2, 12),
++	},
++};
++
++/*
++ * sde-sspp-type vig vig dma dma dma, sde-sspp-off 0x5000 0x7000 0x25000
++ * 0x27000 0x29000, sde-sspp-xin-id 0 4 1 5 9, sde-sspp-src-size 0x1f8,
++ * sde-qseed-type qseedv3lite, sde-smart-dma-rev smart_dma_v2p5.
++ */
++static const struct dpu_sspp_cfg sm7250_sspp[] = {
++	{
++		.name = "sspp_0", .id = SSPP_VIG0,
++		.base = 0x4000, .len = 0x1f8,
++		.features = VIG_SDM845_MASK_SDMA,
++		.sblk = &dpu_vig_sblk_qseed3_2_4,
++		.xin_id = 0,
++		.type = SSPP_TYPE_VIG,
++		.clk_ctrl = DPU_CLK_CTRL_VIG0,
++	}, {
++		.name = "sspp_1", .id = SSPP_VIG1,
++		.base = 0x6000, .len = 0x1f8,
++		.features = VIG_SDM845_MASK_SDMA,
++		.sblk = &dpu_vig_sblk_qseed3_2_4,
++		.xin_id = 4,
++		.type = SSPP_TYPE_VIG,
++		.clk_ctrl = DPU_CLK_CTRL_VIG1,
++	}, {
++		.name = "sspp_8", .id = SSPP_DMA0,
++		.base = 0x24000, .len = 0x1f8,
++		.features = DMA_SDM845_MASK_SDMA,
++		.sblk = &dpu_dma_sblk,
++		.xin_id = 1,
++		.type = SSPP_TYPE_DMA,
++		.clk_ctrl = DPU_CLK_CTRL_DMA0,
++	}, {
++		.name = "sspp_9", .id = SSPP_DMA1,
++		.base = 0x26000, .len = 0x1f8,
++		.features = DMA_SDM845_MASK_SDMA,
++		.sblk = &dpu_dma_sblk,
++		.xin_id = 5,
++		.type = SSPP_TYPE_DMA,
++		.clk_ctrl = DPU_CLK_CTRL_DMA1,
++	}, {
++		.name = "sspp_10", .id = SSPP_DMA2,
++		.base = 0x28000, .len = 0x1f8,
++		.features = DMA_CURSOR_SDM845_MASK_SDMA,
++		.sblk = &dpu_dma_sblk,
++		.xin_id = 9,
++		.type = SSPP_TYPE_DMA,
++		.clk_ctrl = DPU_CLK_CTRL_DMA2,
++	},
++};
++
++/*
++ * sde-mixer-off 0x45000.. (4), sde-mixer-size 0x320, sde-mixer-pair-mask
++ * 2 1 4 3; PP/DSPP assignment follows the 1:1 order of sm7150/sm8250.
++ */
++static const struct dpu_lm_cfg sm7250_lm[] = {
++	{
++		.name = "lm_0", .id = LM_0,
++		.base = 0x44000, .len = 0x320,
++		.features = MIXER_MSM8998_MASK,
++		.sblk = &sdm845_lm_sblk,
++		.lm_pair = LM_1,
++		.pingpong = PINGPONG_0,
++		.dspp = DSPP_0,
++	}, {
++		.name = "lm_1", .id = LM_1,
++		.base = 0x45000, .len = 0x320,
++		.features = MIXER_MSM8998_MASK,
++		.sblk = &sdm845_lm_sblk,
++		.lm_pair = LM_0,
++		.pingpong = PINGPONG_1,
++		.dspp = DSPP_1,
++	}, {
++		.name = "lm_2", .id = LM_2,
++		.base = 0x46000, .len = 0x320,
++		.features = MIXER_MSM8998_MASK,
++		.sblk = &sdm845_lm_sblk,
++		.lm_pair = LM_3,
++		.pingpong = PINGPONG_2,
++	}, {
++		.name = "lm_3", .id = LM_3,
++		.base = 0x47000, .len = 0x320,
++		.features = MIXER_MSM8998_MASK,
++		.sblk = &sdm845_lm_sblk,
++		.lm_pair = LM_2,
++		.pingpong = PINGPONG_3,
++	},
++};
++
++/* sde-dspp-off 0x55000 0x57000, sde-dspp-size 0x1800 */
++static const struct dpu_dspp_cfg sm7250_dspp[] = {
++	{
++		.name = "dspp_0", .id = DSPP_0,
++		.base = 0x54000, .len = 0x1800,
++		.sblk = &sdm845_dspp_sblk,
++	}, {
++		.name = "dspp_1", .id = DSPP_1,
++		.base = 0x56000, .len = 0x1800,
++		.sblk = &sdm845_dspp_sblk,
++	},
++};
++
++/* sde-pp-off 0x71000 0x71800 0x72000 0x72800, sde-pp-merge-3d-id 0 0 1 1 */
++static const struct dpu_pingpong_cfg sm7250_pp[] = {
++	{
++		.name = "pingpong_0", .id = PINGPONG_0,
++		.base = 0x70000, .len = 0xd4,
++		.sblk = &sdm845_pp_sblk,
++		.merge_3d = MERGE_3D_0,
++		.intr_done = DPU_IRQ_IDX(MDP_SSPP_TOP0_INTR, 8),
++	}, {
++		.name = "pingpong_1", .id = PINGPONG_1,
++		.base = 0x70800, .len = 0xd4,
++		.sblk = &sdm845_pp_sblk,
++		.merge_3d = MERGE_3D_0,
++		.intr_done = DPU_IRQ_IDX(MDP_SSPP_TOP0_INTR, 9),
++	}, {
++		.name = "pingpong_2", .id = PINGPONG_2,
++		.base = 0x71000, .len = 0xd4,
++		.sblk = &sdm845_pp_sblk,
++		.merge_3d = MERGE_3D_1,
++		.intr_done = DPU_IRQ_IDX(MDP_SSPP_TOP0_INTR, 10),
++	}, {
++		.name = "pingpong_3", .id = PINGPONG_3,
++		.base = 0x71800, .len = 0xd4,
++		.sblk = &sdm845_pp_sblk,
++		.merge_3d = MERGE_3D_1,
++		.intr_done = DPU_IRQ_IDX(MDP_SSPP_TOP0_INTR, 11),
++	},
++};
++
++/* sde-merge-3d-off 0x84000 0x84100 */
++static const struct dpu_merge_3d_cfg sm7250_merge_3d[] = {
++	{
++		.name = "merge_3d_0", .id = MERGE_3D_0,
++		.base = 0x83000, .len = 0x8,
++	}, {
++		.name = "merge_3d_1", .id = MERGE_3D_1,
++		.base = 0x83100, .len = 0x8,
++	},
++};
++
++/* sde-dsc-off 0x81000 0x81400, sde-dsc-size 0x140, sde-dsc-pair-mask 2 1 */
++static const struct dpu_dsc_cfg sm7250_dsc[] = {
++	{
++		.name = "dsc_0", .id = DSC_0,
++		.base = 0x80000, .len = 0x140,
++	}, {
++		.name = "dsc_1", .id = DSC_1,
++		.base = 0x80400, .len = 0x140,
++	},
++};
++
++/*
++ * sde-intf-off 0x6b000 0x6b800 0x6c000 0x6c800, sde-intf-type dp dsi dsi dp.
++ * Interrupt indices are the same as on sm8150/sm8250/sm7150 (same top
++ * interrupt layout); intf_1 (DSI0) has the tear-read-pointer interrupt used
++ * for command mode panels.
++ */
++static const struct dpu_intf_cfg sm7250_intf[] = {
++	{
++		.name = "intf_0", .id = INTF_0,
++		.base = 0x6a000, .len = 0x280,
++		.type = INTF_DP,
++		.controller_id = MSM_DP_CONTROLLER_0,
++		.prog_fetch_lines_worst_case = 24,
++		.intr_underrun = DPU_IRQ_IDX(MDP_SSPP_TOP0_INTR, 24),
++		.intr_vsync = DPU_IRQ_IDX(MDP_SSPP_TOP0_INTR, 25),
++	}, {
++		.name = "intf_1", .id = INTF_1,
++		.base = 0x6a800, .len = 0x2b8,
++		.type = INTF_DSI,
++		.controller_id = MSM_DSI_CONTROLLER_0,
++		.prog_fetch_lines_worst_case = 24,
++		.intr_underrun = DPU_IRQ_IDX(MDP_SSPP_TOP0_INTR, 26),
++		.intr_vsync = DPU_IRQ_IDX(MDP_SSPP_TOP0_INTR, 27),
++		.intr_tear_rd_ptr = DPU_IRQ_IDX(MDP_INTF1_TEAR_INTR, 2),
++	}, {
++		.name = "intf_2", .id = INTF_2,
++		.base = 0x6b000, .len = 0x2b8,
++		.type = INTF_DSI,
++		.controller_id = MSM_DSI_CONTROLLER_1,
++		.prog_fetch_lines_worst_case = 24,
++		.intr_underrun = DPU_IRQ_IDX(MDP_SSPP_TOP0_INTR, 28),
++		.intr_vsync = DPU_IRQ_IDX(MDP_SSPP_TOP0_INTR, 29),
++		.intr_tear_rd_ptr = DPU_IRQ_IDX(MDP_INTF2_TEAR_INTR, 2),
++	}, {
++		.name = "intf_3", .id = INTF_3,
++		.base = 0x6b800, .len = 0x280,
++		.type = INTF_DP,
++		.controller_id = MSM_DP_CONTROLLER_0,	/* pair with intf_0 for DP MST */
++		.prog_fetch_lines_worst_case = 24,
++		.intr_underrun = DPU_IRQ_IDX(MDP_SSPP_TOP0_INTR, 30),
++		.intr_vsync = DPU_IRQ_IDX(MDP_SSPP_TOP0_INTR, 31),
++	},
++};
++
++/* sde-wb-off 0x66000, sde-wb-xin-id 6, sde-wb-linewidth 4096 */
++static const struct dpu_wb_cfg sm7250_wb[] = {
++	{
++		.name = "wb_2", .id = WB_2,
++		.base = 0x65000, .len = 0x2c8,
++		.features = WB_SDM845_MASK,
++		.format_list = wb2_formats_rgb_yuv,
++		.num_formats = ARRAY_SIZE(wb2_formats_rgb_yuv),
++		.clk_ctrl = DPU_CLK_CTRL_WB2,
++		.xin_id = 6,
++		.maxlinewidth = 4096,
++		.intr_wb_done = DPU_IRQ_IDX(MDP_SSPP_TOP0_INTR, 4),
++	},
++};
++
++/*
++ * Perf: sde-max-bw-{low,high}-kbps, sde-min-{core,llcc,dram}-ib-kbps,
++ * sde-danger-lut / sde-safe-lut-* / sde-qos-lut-* and sde-cdp-setting from
++ * lito-sde.dtsi; min_prefill_lines = 35 from sde_hw_catalog.c (IS_SAIPAN_TARGET).
++ * The inefficiency factors are not in the DT; copied from sm8250/sm7150.
++ */
++static const struct dpu_perf_cfg sm7250_perf_data = {
++	.max_bw_low = 5800000,
++	.max_bw_high = 8600000,
++	.min_core_ib = 4800000,
++	.min_llcc_ib = 0,
++	.min_dram_ib = 800000,
++	.min_prefill_lines = 35,
++	.danger_lut_tbl = {0xff, 0xffff, 0x0},
++	.safe_lut_tbl = {0xfffc, 0xff00, 0xffff},
++	.qos_lut_tbl = {
++		{
++		.nentry = ARRAY_SIZE(sm8150_qos_linear),
++		.entries = sm8150_qos_linear
++		}, {
++		.nentry = ARRAY_SIZE(sc7180_qos_macrotile),
++		.entries = sc7180_qos_macrotile
++		}, {
++		.nentry = ARRAY_SIZE(sc7180_qos_nrt),
++		.entries = sc7180_qos_nrt
++		},
++	},
++	.cdp_cfg = {
++		{.rd_enable = 1, .wr_enable = 1},
++		{.rd_enable = 1, .wr_enable = 0}
++	},
++	.clk_inefficiency_factor = 105,
++	.bw_inefficiency_factor = 120,
++};
++
++static const struct dpu_mdss_version sm7250_mdss_ver = {
++	.core_major_ver = 6,
++	.core_minor_ver = 1,
++};
++
++const struct dpu_mdss_cfg dpu_sm7250_cfg = {
++	.mdss_ver = &sm7250_mdss_ver,
++	.caps = &sm7250_dpu_caps,
++	.mdp = &sm7250_mdp,
++	.cdm = &dpu_cdm_5_x,
++	.ctl_count = ARRAY_SIZE(sm7250_ctl),
++	.ctl = sm7250_ctl,
++	.sspp_count = ARRAY_SIZE(sm7250_sspp),
++	.sspp = sm7250_sspp,
++	.mixer_count = ARRAY_SIZE(sm7250_lm),
++	.mixer = sm7250_lm,
++	.dspp_count = ARRAY_SIZE(sm7250_dspp),
++	.dspp = sm7250_dspp,
++	.dsc_count = ARRAY_SIZE(sm7250_dsc),
++	.dsc = sm7250_dsc,
++	.pingpong_count = ARRAY_SIZE(sm7250_pp),
++	.pingpong = sm7250_pp,
++	.merge_3d_count = ARRAY_SIZE(sm7250_merge_3d),
++	.merge_3d = sm7250_merge_3d,
++	.intf_count = ARRAY_SIZE(sm7250_intf),
++	.intf = sm7250_intf,
++	.vbif = &sdm845_vbif,
++	.wb_count = ARRAY_SIZE(sm7250_wb),
++	.wb = sm7250_wb,
++	.perf = &sm7250_perf_data,
++};
++
++#endif
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_catalog.c b/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_catalog.c
+index 9a993cdfa..3388458ab 100644
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_catalog.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_catalog.c
+@@ -775,6 +775,7 @@ static const struct dpu_qos_lut_entry sc7180_qos_nrt[] = {
+ #include "catalog/dpu_5_4_sm6125.h"
+ 
+ #include "catalog/dpu_6_0_sm8250.h"
++#include "catalog/dpu_6_1_sm7250.h"
+ #include "catalog/dpu_6_2_sc7180.h"
+ #include "catalog/dpu_6_3_sm6115.h"
+ #include "catalog/dpu_6_4_sm6350.h"
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_catalog.h b/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_catalog.h
+index f45faf873..7e0dfed99 100644
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_catalog.h
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_catalog.h
+@@ -780,6 +780,7 @@ extern const struct dpu_mdss_cfg dpu_sdm670_cfg;
+ extern const struct dpu_mdss_cfg dpu_sm8150_cfg;
+ extern const struct dpu_mdss_cfg dpu_sc8180x_cfg;
+ extern const struct dpu_mdss_cfg dpu_sm7150_cfg;
++extern const struct dpu_mdss_cfg dpu_sm7250_cfg;
+ extern const struct dpu_mdss_cfg dpu_sm8250_cfg;
+ extern const struct dpu_mdss_cfg dpu_sc7180_cfg;
+ extern const struct dpu_mdss_cfg dpu_sm6115_cfg;
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c b/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c
+index da3556eb6..6eb6f65ad 100644
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c
+@@ -1506,6 +1506,7 @@ static const struct of_device_id dpu_dt_match[] = {
+ 	{ .compatible = "qcom,sm6350-dpu", .data = &dpu_sm6350_cfg, },
+ 	{ .compatible = "qcom,sm6375-dpu", .data = &dpu_sm6375_cfg, },
+ 	{ .compatible = "qcom,sm7150-dpu", .data = &dpu_sm7150_cfg, },
++	{ .compatible = "qcom,sm7250-dpu", .data = &dpu_sm7250_cfg, },
+ 	{ .compatible = "qcom,sm8150-dpu", .data = &dpu_sm8150_cfg, },
+ 	{ .compatible = "qcom,sm8250-dpu", .data = &dpu_sm8250_cfg, },
+ 	{ .compatible = "qcom,sm8350-dpu", .data = &dpu_sm8350_cfg, },
+diff --git a/drivers/gpu/drm/msm/msm_mdss.c b/drivers/gpu/drm/msm/msm_mdss.c
+index 9087c4b29..d418eef59 100644
+--- a/drivers/gpu/drm/msm/msm_mdss.c
++++ b/drivers/gpu/drm/msm/msm_mdss.c
+@@ -547,6 +547,7 @@ static const struct of_device_id mdss_dt_match[] = {
+ 	{ .compatible = "qcom,sm6350-mdss", .data = &data_76k8 },
+ 	{ .compatible = "qcom,sm6375-mdss", .data = &data_76k8 },
+ 	{ .compatible = "qcom,sm7150-mdss", .data = &data_76k8 },
++	{ .compatible = "qcom,sm7250-mdss", .data = &data_76k8 },
+ 	{ .compatible = "qcom,sm8150-mdss", .data = &data_76k8 },
+ 	{ .compatible = "qcom,sm8250-mdss", .data = &data_76k8 },
+ 	{ .compatible = "qcom,sm8350-mdss", .data = &data_74k },
+diff --git a/drivers/gpu/drm/panel/Kconfig b/drivers/gpu/drm/panel/Kconfig
+index cbdf7b8f7..eb2c9ed7d 100644
+--- a/drivers/gpu/drm/panel/Kconfig
++++ b/drivers/gpu/drm/panel/Kconfig
+@@ -904,6 +904,18 @@ config DRM_PANEL_SAMSUNG_AMS639RQ08
+ 	  Say Y or M here if you want to enable support for the
+ 	  Samsung AMS639RQ08 FHD Plus (2340x1080@60Hz) CMD mode panel.
+ 
++config DRM_PANEL_SAMSUNG_AMS644VK04
++	tristate "Samsung AMS644VK04 DSC command mode panel"
++	depends on OF
++	depends on DRM_MIPI_DSI
++	depends on BACKLIGHT_CLASS_DEVICE
++	depends on GPIOLIB
++	depends on REGULATOR
++	help
++	  Say Y or M here if you want to enable support for the
++	  Samsung AMS644VK04 FHD Plus (1080x2400, 60/90Hz) DSC command mode
++	  AMOLED panel, found in the OnePlus Nord (avicii).
++
+ config DRM_PANEL_SAMSUNG_S6E88A0_AMS427AP24
+ 	tristate "Samsung AMS427AP24 panel with S6E88A0 controller"
+ 	depends on GPIOLIB && OF && REGULATOR
+diff --git a/drivers/gpu/drm/panel/Makefile b/drivers/gpu/drm/panel/Makefile
+index 3b523cf37..dd8198372 100644
+--- a/drivers/gpu/drm/panel/Makefile
++++ b/drivers/gpu/drm/panel/Makefile
+@@ -88,6 +88,7 @@ obj-$(CONFIG_DRM_PANEL_RENESAS_R69328) += panel-renesas-r69328.o
+ obj-$(CONFIG_DRM_PANEL_RONBO_RB070D30) += panel-ronbo-rb070d30.o
+ obj-$(CONFIG_DRM_PANEL_SAMSUNG_AMS581VF01) += panel-samsung-ams581vf01.o
+ obj-$(CONFIG_DRM_PANEL_SAMSUNG_AMS639RQ08) += panel-samsung-ams639rq08.o
++obj-$(CONFIG_DRM_PANEL_SAMSUNG_AMS644VK04) += panel-samsung-ams644vk04.o
+ obj-$(CONFIG_DRM_PANEL_SAMSUNG_ATNA33XC20) += panel-samsung-atna33xc20.o
+ obj-$(CONFIG_DRM_PANEL_SAMSUNG_DB7430) += panel-samsung-db7430.o
+ obj-$(CONFIG_DRM_PANEL_SAMSUNG_LD9040) += panel-samsung-ld9040.o
+diff --git a/drivers/gpu/drm/panel/panel-samsung-ams644vk04.c b/drivers/gpu/drm/panel/panel-samsung-ams644vk04.c
+new file mode 100644
+index 000000000..bbd8ddf3b
+--- /dev/null
++++ b/drivers/gpu/drm/panel/panel-samsung-ams644vk04.c
+@@ -0,0 +1,472 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Samsung AMS644VK04 AMOLED DSI command mode panel driver (DSC)
++ *
++ * 1080x2400, 4 lanes, DSC 1.1 8 bpc -> 8 bpp, 60 Hz and 90 Hz.
++ * Found in the OnePlus Nord (avicii).
++ *
++ * The initialisation sequences were generated from the downstream panel
++ * description ("samsung ams644vk04 fhd cmd mode dsc dsi panel").
++ */
++
++#include <linux/backlight.h>
++#include <linux/delay.h>
++#include <linux/gpio/consumer.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/regulator/consumer.h>
++
++#include <drm/display/drm_dsc.h>
++#include <drm/drm_connector.h>
++#include <drm/drm_crtc.h>
++#include <drm/drm_mipi_dsi.h>
++#include <drm/drm_modes.h>
++#include <drm/drm_panel.h>
++
++#define AMS644VK04_WIDTH		1080
++#define AMS644VK04_HEIGHT		2400
++
++#define AMS644VK04_MAX_BRIGHTNESS	0x7ff
++#define AMS644VK04_DEFAULT_BRIGHTNESS	0x140
++
++enum {
++	AMS644VK04_SUPPLY_VDDIO,
++	AMS644VK04_SUPPLY_VOUT,
++	AMS644VK04_SUPPLY_VDD,
++	AMS644VK04_NUM_SUPPLIES,
++};
++
++/* Power-on order, post-on delay and load as given by the downstream supply entries */
++static const struct ams644vk04_supply_info {
++	const char *name;
++	unsigned int enable_load_ua;
++	unsigned int disable_load_ua;
++	unsigned int post_on_ms;
++} ams644vk04_supply_info[AMS644VK04_NUM_SUPPLIES] = {
++	[AMS644VK04_SUPPLY_VDDIO] = { "vddio", 62000, 80, 20 },
++	[AMS644VK04_SUPPLY_VOUT] = { "vout", 857000, 0, 20 },
++	[AMS644VK04_SUPPLY_VDD] = { "vdd", 857000, 0, 0 },
++};
++
++struct ams644vk04 {
++	struct drm_panel panel;
++	struct mipi_dsi_device *dsi;
++	struct drm_connector *connector;
++	struct drm_dsc_config dsc;
++	struct gpio_desc *reset_gpio;
++	struct regulator *supplies[AMS644VK04_NUM_SUPPLIES];
++	bool prepared;
++};
++
++static inline struct ams644vk04 *to_ams644vk04(struct drm_panel *panel)
++{
++	return container_of(panel, struct ams644vk04, panel);
++}
++
++/*
++ * DSC Picture Parameter Set as sent by the downstream driver: DCS 0x9e with
++ * the first 88 bytes of the PPS.  It is not what the DRM DSC helpers compute
++ * for the same slice geometry (SCR1-style rate control parameters), but it is
++ * the combination known to work with this panel.
++ */
++static const u8 ams644vk04_pps_cmd[] = {
++	0x9e, 0x11, 0x00, 0x00, 0x89, 0x30, 0x80, 0x09,
++	0x60, 0x04, 0x38, 0x00, 0x30, 0x02, 0x1c, 0x02,
++	0x1c, 0x02, 0x00, 0x02, 0x52, 0x00, 0x20, 0x04,
++	0x23, 0x00, 0x07, 0x00, 0x0f, 0x02, 0x8e, 0x02,
++	0x1f, 0x18, 0x00, 0x10, 0xf0, 0x03, 0x0c, 0x20,
++	0x00, 0x06, 0x0b, 0x0b, 0x33, 0x0e, 0x1c, 0x2a,
++	0x38, 0x46, 0x54, 0x62, 0x69, 0x70, 0x77, 0x79,
++	0x7b, 0x7d, 0x7e, 0x01, 0x02, 0x01, 0x00, 0x09,
++	0x40, 0x09, 0xbe, 0x19, 0xfc, 0x19, 0xfa, 0x19,
++	0xf8, 0x1a, 0x38, 0x1a, 0x78, 0x1a, 0xb6, 0x2a,
++	0xb6, 0x2a, 0xf4, 0x2a, 0xf4, 0x4b, 0x34, 0x63,
++	0x74,
++};
++
++static void ams644vk04_send_on(struct mipi_dsi_multi_context *dsi_ctx, bool hz90)
++{
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xf0, 0x5a, 0x5a);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0x9d, 0x01);
++	mipi_dsi_dcs_write_buffer_multi(dsi_ctx, ams644vk04_pps_cmd, sizeof(ams644vk04_pps_cmd));
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xf0, 0xa5, 0xa5);
++	mipi_dsi_dcs_exit_sleep_mode_multi(dsi_ctx);
++	mipi_dsi_msleep(dsi_ctx, 20);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xf0, 0x5a, 0x5a);
++	mipi_dsi_dcs_set_tear_on_multi(dsi_ctx, MIPI_DSI_DCS_TEAR_MODE_VBLANK);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xf0, 0xa5, 0xa5);
++	mipi_dsi_dcs_set_column_address_multi(dsi_ctx, 0, AMS644VK04_WIDTH - 1);
++	mipi_dsi_dcs_set_page_address_multi(dsi_ctx, 0, AMS644VK04_HEIGHT - 1);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xf0, 0x5a, 0x5a);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xf5, 0x85);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xb0, 0x02);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xf8, 0xc4);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xb0, 0x04);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xf8, 0x41, 0x47, 0x11, 0xb8, 0xb8);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xb0, 0x02);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xf8, 0xcc);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xb0, 0x03);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xf2, 0x82);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xf5, 0x87);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xf0, 0xa5, 0xa5);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xf0, 0x5a, 0x5a);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xb0, 0x03);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xdd, 0x40);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xf0, 0xa5, 0xa5);
++	mipi_dsi_msleep(dsi_ctx, 110);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xf0, 0x5a, 0x5a);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xb0, 0x06);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xb7, 0x01);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xb0, 0x05);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xb7, 0x13);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xb7, 0x01, 0x37);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xf0, 0xa5, 0xa5);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0x53, 0x20);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xf0, 0x5a, 0x5a);
++	if (hz90)
++		mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0x60, 0x10);
++	else
++		mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0x60, 0x00);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xf0, 0xa5, 0xa5);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xf0, 0x5a, 0x5a);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0x55, 0x00);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xf0, 0xa5, 0xa5);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xf0, 0x5a, 0x5a);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xbd, 0x01);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xf0, 0xa5, 0xa5);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xf0, 0x5a, 0x5a);
++	if (hz90) {
++		mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xe6, 0x00);
++	} else {
++		mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xe6, 0x02);
++		mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xf0, 0xa5, 0xa5);
++		mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xf0, 0x5a, 0x5a);
++		mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xb0, 0x69);
++		mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xe6, 0x02);
++		mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xb0, 0x77);
++		mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xe6, 0xb3);
++	}
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xf0, 0xa5, 0xa5);
++	mipi_dsi_dcs_set_display_on_multi(dsi_ctx);
++}
++
++static void ams644vk04_send_off(struct mipi_dsi_multi_context *dsi_ctx)
++{
++	mipi_dsi_dcs_set_display_off_multi(dsi_ctx);
++	mipi_dsi_msleep(dsi_ctx, 10);
++	mipi_dsi_dcs_enter_sleep_mode_multi(dsi_ctx);
++	mipi_dsi_msleep(dsi_ctx, 120);
++}
++
++static void ams644vk04_reset(struct ams644vk04 *ctx)
++{
++	/* Downstream: <1 10>, <0 10>, <1 10> with 1 = out of reset */
++	gpiod_set_value_cansleep(ctx->reset_gpio, 0);
++	usleep_range(10000, 10100);
++	gpiod_set_value_cansleep(ctx->reset_gpio, 1);
++	usleep_range(10000, 10100);
++	gpiod_set_value_cansleep(ctx->reset_gpio, 0);
++	usleep_range(10000, 10100);
++}
++
++static void ams644vk04_supplies_disable(struct ams644vk04 *ctx, int first)
++{
++	int i;
++
++	for (i = first; i >= 0; i--) {
++		if (!ctx->supplies[i])
++			continue;
++
++		regulator_set_load(ctx->supplies[i],
++				   ams644vk04_supply_info[i].disable_load_ua);
++		regulator_disable(ctx->supplies[i]);
++	}
++}
++
++static int ams644vk04_supplies_enable(struct ams644vk04 *ctx)
++{
++	struct device *dev = &ctx->dsi->dev;
++	int i, ret;
++
++	for (i = 0; i < AMS644VK04_NUM_SUPPLIES; i++) {
++		if (!ctx->supplies[i])
++			continue;
++
++		/* Best effort, only matters if the regulator can switch modes */
++		regulator_set_load(ctx->supplies[i],
++				   ams644vk04_supply_info[i].enable_load_ua);
++
++		ret = regulator_enable(ctx->supplies[i]);
++		if (ret) {
++			dev_err(dev, "Failed to enable %s: %d\n",
++				ams644vk04_supply_info[i].name, ret);
++			ams644vk04_supplies_disable(ctx, i - 1);
++			return ret;
++		}
++
++		if (ams644vk04_supply_info[i].post_on_ms)
++			msleep(ams644vk04_supply_info[i].post_on_ms);
++	}
++
++	return 0;
++}
++
++static bool ams644vk04_want_90hz(struct ams644vk04 *ctx)
++{
++	struct drm_connector *connector = ctx->connector;
++
++	if (!connector || !connector->state || !connector->state->crtc ||
++	    !connector->state->crtc->state)
++		return false;
++
++	return drm_mode_vrefresh(&connector->state->crtc->state->mode) > 75;
++}
++
++static int ams644vk04_prepare(struct drm_panel *panel)
++{
++	struct ams644vk04 *ctx = to_ams644vk04(panel);
++	struct device *dev = &ctx->dsi->dev;
++	struct mipi_dsi_multi_context dsi_ctx = { .dsi = ctx->dsi };
++	bool hz90 = ams644vk04_want_90hz(ctx);
++	int ret;
++
++	dev_info(dev, "prepare: start (%s mode)\n", hz90 ? "90 Hz" : "60 Hz");
++
++	ret = ams644vk04_supplies_enable(ctx);
++	if (ret)
++		return ret;
++
++	ams644vk04_reset(ctx);
++
++	ams644vk04_send_on(&dsi_ctx, hz90);
++	if (dsi_ctx.accum_err) {
++		ret = dsi_ctx.accum_err;
++		dev_err(dev, "Failed to send on sequence: %d\n", ret);
++		goto err_power_down;
++	}
++
++	ctx->prepared = true;
++	dev_info(dev, "prepare: done\n");
++
++	return 0;
++
++err_power_down:
++	gpiod_set_value_cansleep(ctx->reset_gpio, 1);
++	ams644vk04_supplies_disable(ctx, AMS644VK04_NUM_SUPPLIES - 1);
++
++	return ret;
++}
++
++static int ams644vk04_unprepare(struct drm_panel *panel)
++{
++	struct ams644vk04 *ctx = to_ams644vk04(panel);
++	struct device *dev = &ctx->dsi->dev;
++	struct mipi_dsi_multi_context dsi_ctx = { .dsi = ctx->dsi };
++
++	ctx->prepared = false;
++
++	ams644vk04_send_off(&dsi_ctx);
++	if (dsi_ctx.accum_err)
++		dev_err(dev, "Failed to send off sequence: %d\n", dsi_ctx.accum_err);
++
++	gpiod_set_value_cansleep(ctx->reset_gpio, 1);
++	ams644vk04_supplies_disable(ctx, AMS644VK04_NUM_SUPPLIES - 1);
++
++	return 0;
++}
++
++/*
++ * Timings are the downstream ones.  The clock is htotal * vtotal * refresh:
++ * the msm DSI host scales the pixel clock for DSC by itself, so the mode
++ * describes the uncompressed picture.  The large 60 Hz vertical front porch
++ * is what keeps both modes on the same pixel clock.
++ */
++static const struct drm_display_mode ams644vk04_modes[] = {
++	{	/* 60 Hz */
++		.clock = (1080 + 52 + 24 + 24) * (2400 + 1208 + 4 + 8) * 60 / 1000,
++		.hdisplay = 1080,
++		.hsync_start = 1080 + 52,
++		.hsync_end = 1080 + 52 + 24,
++		.htotal = 1080 + 52 + 24 + 24,
++		.vdisplay = 2400,
++		.vsync_start = 2400 + 1208,
++		.vsync_end = 2400 + 1208 + 4,
++		.vtotal = 2400 + 1208 + 4 + 8,
++		.width_mm = 67,
++		.height_mm = 149,
++		.type = DRM_MODE_TYPE_DRIVER | DRM_MODE_TYPE_PREFERRED,
++	},
++	{	/* 90 Hz */
++		.clock = (1080 + 52 + 24 + 24) * (2400 + 4 + 4 + 8) * 90 / 1000,
++		.hdisplay = 1080,
++		.hsync_start = 1080 + 52,
++		.hsync_end = 1080 + 52 + 24,
++		.htotal = 1080 + 52 + 24 + 24,
++		.vdisplay = 2400,
++		.vsync_start = 2400 + 4,
++		.vsync_end = 2400 + 4 + 4,
++		.vtotal = 2400 + 4 + 4 + 8,
++		.width_mm = 67,
++		.height_mm = 149,
++		.type = DRM_MODE_TYPE_DRIVER,
++	},
++};
++
++static int ams644vk04_get_modes(struct drm_panel *panel,
++				struct drm_connector *connector)
++{
++	struct ams644vk04 *ctx = to_ams644vk04(panel);
++	int i, count = 0;
++
++	for (i = 0; i < ARRAY_SIZE(ams644vk04_modes); i++) {
++		struct drm_display_mode *mode;
++
++		mode = drm_mode_duplicate(connector->dev, &ams644vk04_modes[i]);
++		if (!mode)
++			return count;
++
++		drm_mode_probed_add(connector, mode);
++		count++;
++	}
++
++	connector->display_info.width_mm = ams644vk04_modes[0].width_mm;
++	connector->display_info.height_mm = ams644vk04_modes[0].height_mm;
++	connector->display_info.bpc = 8;
++	ctx->connector = connector;
++
++	return count;
++}
++
++static const struct drm_panel_funcs ams644vk04_panel_funcs = {
++	.prepare = ams644vk04_prepare,
++	.unprepare = ams644vk04_unprepare,
++	.get_modes = ams644vk04_get_modes,
++};
++
++static int ams644vk04_bl_update_status(struct backlight_device *bl)
++{
++	struct ams644vk04 *ctx = bl_get_data(bl);
++
++	if (!ctx->prepared)
++		return 0;
++
++	/* The panel takes the 11 bit level most significant byte first */
++	return mipi_dsi_dcs_set_display_brightness_large(ctx->dsi,
++							 backlight_get_brightness(bl));
++}
++
++static const struct backlight_ops ams644vk04_bl_ops = {
++	.update_status = ams644vk04_bl_update_status,
++};
++
++static int ams644vk04_probe(struct mipi_dsi_device *dsi)
++{
++	struct device *dev = &dsi->dev;
++	const struct backlight_properties props = {
++		.type = BACKLIGHT_RAW,
++		.brightness = AMS644VK04_DEFAULT_BRIGHTNESS,
++		.max_brightness = AMS644VK04_MAX_BRIGHTNESS,
++	};
++	struct backlight_device *bl;
++	struct ams644vk04 *ctx;
++	int i, ret;
++
++	ctx = devm_drm_panel_alloc(dev, struct ams644vk04, panel,
++				   &ams644vk04_panel_funcs,
++				   DRM_MODE_CONNECTOR_DSI);
++	if (IS_ERR(ctx))
++		return PTR_ERR(ctx);
++
++	/* The supplies are optional: a missing one is simply not controlled */
++	for (i = 0; i < AMS644VK04_NUM_SUPPLIES; i++) {
++		struct regulator *reg;
++
++		reg = devm_regulator_get_optional(dev, ams644vk04_supply_info[i].name);
++		if (IS_ERR(reg)) {
++			if (PTR_ERR(reg) != -ENODEV)
++				return dev_err_probe(dev, PTR_ERR(reg),
++						     "Failed to get %s supply\n",
++						     ams644vk04_supply_info[i].name);
++			continue;
++		}
++
++		ctx->supplies[i] = reg;
++	}
++
++	ctx->reset_gpio = devm_gpiod_get(dev, "reset", GPIOD_OUT_HIGH);
++	if (IS_ERR(ctx->reset_gpio))
++		return dev_err_probe(dev, PTR_ERR(ctx->reset_gpio),
++				     "Failed to get reset-gpios\n");
++
++	ctx->dsi = dsi;
++	mipi_dsi_set_drvdata(dsi, ctx);
++
++	dsi->lanes = 4;
++	dsi->format = MIPI_DSI_FMT_RGB888;
++	dsi->mode_flags = MIPI_DSI_MODE_LPM | MIPI_DSI_CLOCK_NON_CONTINUOUS |
++			  MIPI_DSI_MODE_DSC_ALL_SLICES_IN_PKT;
++
++	/*
++	 * DSC 1.1, 8 bpc, 8 bpp (4 fractional bits), block prediction, two
++	 * 540x48 slices per line, both in the same packet.  The DSI host
++	 * derives the remaining rate control parameters from this.
++	 */
++	ctx->dsc.dsc_version_major = 1;
++	ctx->dsc.dsc_version_minor = 1;
++	ctx->dsc.slice_width = 540;
++	ctx->dsc.slice_height = 48;
++	ctx->dsc.slice_count = AMS644VK04_WIDTH / ctx->dsc.slice_width;
++	ctx->dsc.bits_per_component = 8;
++	ctx->dsc.bits_per_pixel = 8 << 4;
++	ctx->dsc.block_pred_enable = true;
++	dsi->dsc = &ctx->dsc;
++
++	ctx->panel.prepare_prev_first = true;
++
++	bl = devm_backlight_device_register(dev, dev_name(dev), dev, ctx,
++					    &ams644vk04_bl_ops, &props);
++	if (IS_ERR(bl))
++		return dev_err_probe(dev, PTR_ERR(bl), "Failed to register backlight\n");
++	ctx->panel.backlight = bl;
++
++	drm_panel_add(&ctx->panel);
++
++	ret = mipi_dsi_attach(dsi);
++	if (ret < 0) {
++		drm_panel_remove(&ctx->panel);
++		return dev_err_probe(dev, ret, "Failed to attach to DSI host\n");
++	}
++
++	return 0;
++}
++
++static void ams644vk04_remove(struct mipi_dsi_device *dsi)
++{
++	struct ams644vk04 *ctx = mipi_dsi_get_drvdata(dsi);
++	int ret;
++
++	ret = mipi_dsi_detach(dsi);
++	if (ret < 0)
++		dev_err(&dsi->dev, "Failed to detach from DSI host: %d\n", ret);
++
++	drm_panel_remove(&ctx->panel);
++}
++
++static const struct of_device_id ams644vk04_of_match[] = {
++	{ .compatible = "samsung,ams644vk04" },
++	{ /* sentinel */ }
++};
++MODULE_DEVICE_TABLE(of, ams644vk04_of_match);
++
++static struct mipi_dsi_driver ams644vk04_driver = {
++	.probe = ams644vk04_probe,
++	.remove = ams644vk04_remove,
++	.driver = {
++		.name = "panel-samsung-ams644vk04",
++		.of_match_table = ams644vk04_of_match,
++	},
++};
++module_mipi_dsi_driver(ams644vk04_driver);
++
++MODULE_DESCRIPTION("Panel driver for the Samsung AMS644VK04 AMOLED DSI panel");
++MODULE_LICENSE("GPL");

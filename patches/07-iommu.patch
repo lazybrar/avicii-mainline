@@ -1,0 +1,22 @@
+Subject: iommu/arm-smmu-qcom: SM7250 GPU SMMU
+
+Combined diff of the following commits (base v7.3-rc7):
+
+  - iommu/arm-smmu-qcom: skip PRR setup on the SM7250 GPU SMMU
+
+---
+ drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c b/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c
+index 795e8ec7e..55071eb03 100644
+--- a/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c
++++ b/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c
+@@ -394,6 +394,7 @@ static int qcom_adreno_smmu_init_context(struct arm_smmu_domain *smmu_domain,
+ 	priv->set_prr_addr = NULL;
+ 
+ 	if (of_device_is_compatible(np, "qcom,smmu-500") &&
++	    !of_device_is_compatible(np, "qcom,sm7250-smmu-500") &&
+ 	    !of_device_is_compatible(np, "qcom,sm8250-smmu-500") &&
+ 	    of_device_is_compatible(np, "qcom,adreno-smmu")) {
+ 		priv->set_prr_bit = qcom_adreno_smmu_set_prr_bit;

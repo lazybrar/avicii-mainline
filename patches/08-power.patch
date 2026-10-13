@@ -1,0 +1,516 @@
+Subject: power: supply: PM7250B charger, BQ27411 gauge
+
+Combined diff of the following commits (base v7.3-rc7):
+
+  - power: supply: Add Qualcomm PM7250B charger status and charge inhibit driver
+  - power: supply: qcom_pm7250b_charger: add charge control start/end thresholds
+
+---
+ drivers/power/supply/Kconfig                |  10 ++
+ drivers/power/supply/Makefile               |   1 +
+ drivers/power/supply/qcom_pm7250b_charger.c | 464 ++++++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 475 insertions(+)
+
+diff --git a/drivers/power/supply/Kconfig b/drivers/power/supply/Kconfig
+index b89ef40df..86219dbf4 100644
+--- a/drivers/power/supply/Kconfig
++++ b/drivers/power/supply/Kconfig
+@@ -1181,6 +1181,16 @@ config CHARGER_QCOM_SMB2
+ 	  adds support for the SMB2 switch mode battery charger found
+ 	  in PMI8998 and related PMICs.
+ 
++config CHARGER_QCOM_PM7250B
++	tristate "Qualcomm PM7250B charger status and charge control"
++	depends on MFD_SPMI_PMIC
++	help
++	  Say Y here to report the state of the SMB5 charger in PM7250B
++	  and to allow userspace to stop and resume battery charging
++	  through the charge_behaviour property (bypass charging). The
++	  driver only ever writes the charge enable command bit, and only
++	  on request; it does not touch any voltage or current limit.
++
+ config FUEL_GAUGE_MM8013
+ 	tristate "Mitsumi MM8013 fuel gauge driver"
+ 	depends on I2C
+diff --git a/drivers/power/supply/Makefile b/drivers/power/supply/Makefile
+index f3c0d1006..cecb2f13d 100644
+--- a/drivers/power/supply/Makefile
++++ b/drivers/power/supply/Makefile
+@@ -132,6 +132,7 @@ obj-$(CONFIG_CHARGER_SURFACE)	+= surface_charger.o
+ obj-$(CONFIG_BATTERY_CHARGER_SURFACE_RT) += surface-rt-ec.o
+ obj-$(CONFIG_BATTERY_UG3105)	+= ug3105_battery.o
+ obj-$(CONFIG_CHARGER_QCOM_SMB2)	+= qcom_smbx.o
++obj-$(CONFIG_CHARGER_QCOM_PM7250B)	+= qcom_pm7250b_charger.o
+ obj-$(CONFIG_FUEL_GAUGE_MM8013)	+= mm8013.o
+ obj-$(CONFIG_MACSMC_POWER)	+= macsmc-power.o
+ obj-$(CONFIG_CHARGER_MAX77759)	+= max77759_charger.o
+diff --git a/drivers/power/supply/qcom_pm7250b_charger.c b/drivers/power/supply/qcom_pm7250b_charger.c
+new file mode 100644
+index 000000000..480aa56f9
+--- /dev/null
++++ b/drivers/power/supply/qcom_pm7250b_charger.c
+@@ -0,0 +1,464 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Qualcomm PM7250B (SMB5) charger: minimal charge control.
++ *
++ * Exposes the state of the SMB5 charger block and lets userspace stop and
++ * resume battery charging through the charge_behaviour property
++ * ("auto" / "inhibit-charge"), so a USB powered device can run in bypass
++ * mode. The only register this driver ever writes is the charge enable
++ * command bit. No current, voltage or input suspend register is touched.
++ *
++ * If the device tree names a fuel gauge in "power-supplies", the driver also
++ * implements a laptop style charge limit (charge_control_start_threshold and
++ * charge_control_end_threshold): the gauge capacity is polled and charging
++ * is inhibited once it reaches the end threshold and resumed when it falls
++ * to the start threshold. When the gauge cannot be read, charging is left
++ * enabled.
++ */
++
++#include <linux/bits.h>
++#include <linux/bitfield.h>
++#include <linux/devm-helpers.h>
++#include <linux/mod_devicetable.h>
++#include <linux/module.h>
++#include <linux/mutex.h>
++#include <linux/platform_device.h>
++#include <linux/power_supply.h>
++#include <linux/property.h>
++#include <linux/regmap.h>
++#include <linux/workqueue.h>
++
++/* Offsets from the charger peripheral base (CHGR_BASE, DT "reg" = 0x1000) */
++#define CHGR_STATUS_1			0x06
++#define  CHGR_STATUS_MASK		GENMASK(2, 0)
++#define  CHGR_INHIBIT			0
++#define  CHGR_TRICKLE			1
++#define  CHGR_PRE			2
++#define  CHGR_FULLON			3
++#define  CHGR_TAPER			4
++#define  CHGR_TERMINATE			5
++#define  CHGR_PAUSE			6
++#define  CHGR_DISABLE			7
++#define CHARGING_ENABLE_CMD		0x42
++#define  CHARGING_ENABLE_CMD_BIT	BIT(0)
++#define CHGR_CFG2			0x51
++#define  CHG_EN_SRC_BIT			BIT(7)
++#define  CHG_EN_POLARITY_BIT		BIT(6)
++
++/* DCDC_BASE = CHGR_BASE + 0x100 */
++#define POWER_PATH_STATUS		0x10b
++#define  USE_USBIN_BIT			BIT(4)
++#define  VALID_INPUT_POWER_SRC_BIT	BIT(0)
++
++/* USBIN_BASE = CHGR_BASE + 0x300 */
++#define USBIN_INT_RT_STS		0x310
++#define  USBIN_PLUGIN_RT_STS_BIT	BIT(4)
++
++#define CHG_LIMIT_POLL_MS		20000
++#define CHG_LIMIT_AUTO_HYST		5	/* resume this far below the end threshold */
++
++struct pm7250b_chg {
++	struct device *dev;
++	struct regmap *regmap;
++	struct power_supply *psy;
++	struct power_supply *gauge;	/* optional, for the charge limit */
++	struct delayed_work limit_work;
++	struct mutex lock;	/* protects the fields below and the enable bit */
++	bool user_inhibit;	/* userspace asked for inhibit-charge */
++	bool limit_hold;	/* charge limit reached */
++	u8 start_thr;		/* 0 = end threshold minus CHG_LIMIT_AUTO_HYST */
++	u8 end_thr;
++	u32 base;
++	bool sw_ctrl;		/* charge enable is driven by the command bit */
++};
++
++static int pm7250b_chg_read(struct pm7250b_chg *chg, unsigned int off,
++			    unsigned int *val)
++{
++	return regmap_read(chg->regmap, chg->base + off, val);
++}
++
++static int pm7250b_chg_online(struct pm7250b_chg *chg, int *online)
++{
++	unsigned int stat;
++	int ret;
++
++	ret = pm7250b_chg_read(chg, POWER_PATH_STATUS, &stat);
++	if (ret)
++		return ret;
++
++	*online = (stat & USE_USBIN_BIT) && (stat & VALID_INPUT_POWER_SRC_BIT);
++	return 0;
++}
++
++static int pm7250b_chg_status(struct pm7250b_chg *chg, int *status)
++{
++	unsigned int stat;
++	int online, ret;
++
++	ret = pm7250b_chg_online(chg, &online);
++	if (ret)
++		return ret;
++
++	ret = pm7250b_chg_read(chg, CHGR_STATUS_1, &stat);
++	if (ret)
++		return ret;
++
++	stat = FIELD_GET(CHGR_STATUS_MASK, stat);
++
++	if (!online) {
++		*status = (stat == CHGR_TERMINATE || stat == CHGR_INHIBIT) ?
++			  POWER_SUPPLY_STATUS_FULL :
++			  POWER_SUPPLY_STATUS_DISCHARGING;
++		return 0;
++	}
++
++	switch (stat) {
++	case CHGR_TRICKLE:
++	case CHGR_PRE:
++	case CHGR_FULLON:
++	case CHGR_TAPER:
++		*status = POWER_SUPPLY_STATUS_CHARGING;
++		break;
++	case CHGR_TERMINATE:
++	case CHGR_INHIBIT:
++		*status = POWER_SUPPLY_STATUS_FULL;
++		break;
++	case CHGR_PAUSE:
++	case CHGR_DISABLE:
++		*status = POWER_SUPPLY_STATUS_NOT_CHARGING;
++		break;
++	default:
++		*status = POWER_SUPPLY_STATUS_UNKNOWN;
++		break;
++	}
++
++	return 0;
++}
++
++static int pm7250b_chg_charge_type(struct pm7250b_chg *chg, int *type)
++{
++	unsigned int stat;
++	int ret;
++
++	ret = pm7250b_chg_read(chg, CHGR_STATUS_1, &stat);
++	if (ret)
++		return ret;
++
++	switch (FIELD_GET(CHGR_STATUS_MASK, stat)) {
++	case CHGR_TRICKLE:
++	case CHGR_PRE:
++		*type = POWER_SUPPLY_CHARGE_TYPE_TRICKLE;
++		break;
++	case CHGR_FULLON:
++	case CHGR_TAPER:
++		*type = POWER_SUPPLY_CHARGE_TYPE_FAST;
++		break;
++	default:
++		*type = POWER_SUPPLY_CHARGE_TYPE_NONE;
++		break;
++	}
++
++	return 0;
++}
++
++static int pm7250b_chg_behaviour(struct pm7250b_chg *chg, int *behaviour)
++{
++	unsigned int cmd, stat;
++	int ret;
++
++	if (!chg->sw_ctrl) {
++		/* Pin controlled: the command bit is meaningless, use status */
++		ret = pm7250b_chg_read(chg, CHGR_STATUS_1, &stat);
++		if (ret)
++			return ret;
++		*behaviour = FIELD_GET(CHGR_STATUS_MASK, stat) == CHGR_DISABLE ?
++			     POWER_SUPPLY_CHARGE_BEHAVIOUR_INHIBIT_CHARGE :
++			     POWER_SUPPLY_CHARGE_BEHAVIOUR_AUTO;
++		return 0;
++	}
++
++	ret = pm7250b_chg_read(chg, CHARGING_ENABLE_CMD, &cmd);
++	if (ret)
++		return ret;
++
++	*behaviour = (cmd & CHARGING_ENABLE_CMD_BIT) ?
++		     POWER_SUPPLY_CHARGE_BEHAVIOUR_AUTO :
++		     POWER_SUPPLY_CHARGE_BEHAVIOUR_INHIBIT_CHARGE;
++	return 0;
++}
++
++static int pm7250b_chg_start_thr(struct pm7250b_chg *chg)
++{
++	if (chg->start_thr)
++		return chg->start_thr;
++
++	return max_t(int, chg->end_thr - CHG_LIMIT_AUTO_HYST, 0);
++}
++
++/* Write the enable bit from the user and charge limit state, lock held */
++static int pm7250b_chg_apply(struct pm7250b_chg *chg)
++{
++	bool inhibit = chg->user_inhibit || chg->limit_hold;
++	int ret;
++
++	if (!chg->sw_ctrl)
++		return -EOPNOTSUPP;
++
++	ret = regmap_update_bits(chg->regmap, chg->base + CHARGING_ENABLE_CMD,
++				 CHARGING_ENABLE_CMD_BIT,
++				 inhibit ? 0 : CHARGING_ENABLE_CMD_BIT);
++	if (!ret)
++		dev_dbg(chg->dev, "charging %s\n",
++			inhibit ? "inhibited" : "enabled");
++	return ret;
++}
++
++/* Update the charge limit state from the gauge, lock held */
++static void pm7250b_chg_limit_eval(struct pm7250b_chg *chg)
++{
++	union power_supply_propval cap;
++	bool hold = chg->limit_hold;
++
++	if (chg->end_thr >= 100 || !chg->gauge ||
++	    power_supply_get_property(chg->gauge, POWER_SUPPLY_PROP_CAPACITY,
++				      &cap) ||
++	    cap.intval < 0 || cap.intval > 100) {
++		/* Limit off or gauge unusable: always allow charging */
++		hold = false;
++	} else if (cap.intval >= chg->end_thr) {
++		hold = true;
++	} else if (cap.intval <= pm7250b_chg_start_thr(chg)) {
++		hold = false;
++	}
++
++	if (hold != chg->limit_hold) {
++		chg->limit_hold = hold;
++		dev_info(chg->dev, "charge limit %s\n",
++			 hold ? "reached, charging stopped" : "released");
++		pm7250b_chg_apply(chg);
++	}
++}
++
++static void pm7250b_chg_limit_work(struct work_struct *work)
++{
++	struct pm7250b_chg *chg = container_of(to_delayed_work(work),
++					       struct pm7250b_chg, limit_work);
++
++	mutex_lock(&chg->lock);
++	pm7250b_chg_limit_eval(chg);
++	mutex_unlock(&chg->lock);
++
++	schedule_delayed_work(&chg->limit_work,
++			      msecs_to_jiffies(CHG_LIMIT_POLL_MS));
++}
++
++static int pm7250b_chg_get_property(struct power_supply *psy,
++				    enum power_supply_property psp,
++				    union power_supply_propval *val)
++{
++	struct pm7250b_chg *chg = power_supply_get_drvdata(psy);
++	unsigned int stat;
++	int ret;
++
++	switch (psp) {
++	case POWER_SUPPLY_PROP_ONLINE:
++		return pm7250b_chg_online(chg, &val->intval);
++	case POWER_SUPPLY_PROP_PRESENT:
++		ret = pm7250b_chg_read(chg, USBIN_INT_RT_STS, &stat);
++		if (ret)
++			return ret;
++		val->intval = !!(stat & USBIN_PLUGIN_RT_STS_BIT);
++		return 0;
++	case POWER_SUPPLY_PROP_STATUS:
++		return pm7250b_chg_status(chg, &val->intval);
++	case POWER_SUPPLY_PROP_CHARGE_TYPE:
++		return pm7250b_chg_charge_type(chg, &val->intval);
++	case POWER_SUPPLY_PROP_CHARGE_BEHAVIOUR:
++		return pm7250b_chg_behaviour(chg, &val->intval);
++	case POWER_SUPPLY_PROP_CHARGE_CONTROL_END_THRESHOLD:
++		val->intval = chg->end_thr;
++		return 0;
++	case POWER_SUPPLY_PROP_CHARGE_CONTROL_START_THRESHOLD:
++		val->intval = pm7250b_chg_start_thr(chg);
++		return 0;
++	default:
++		return -EINVAL;
++	}
++}
++
++static int pm7250b_chg_set_property(struct power_supply *psy,
++				    enum power_supply_property psp,
++				    const union power_supply_propval *val)
++{
++	struct pm7250b_chg *chg = power_supply_get_drvdata(psy);
++	int ret = 0;
++
++	if (!chg->sw_ctrl)
++		return -EOPNOTSUPP;
++
++	mutex_lock(&chg->lock);
++	switch (psp) {
++	case POWER_SUPPLY_PROP_CHARGE_BEHAVIOUR:
++		switch (val->intval) {
++		case POWER_SUPPLY_CHARGE_BEHAVIOUR_AUTO:
++			chg->user_inhibit = false;
++			break;
++		case POWER_SUPPLY_CHARGE_BEHAVIOUR_INHIBIT_CHARGE:
++			chg->user_inhibit = true;
++			break;
++		default:
++			ret = -EINVAL;
++		}
++		if (!ret) {
++			ret = pm7250b_chg_apply(chg);
++			if (!ret)
++				dev_info(chg->dev, "charging %s by userspace request\n",
++					 chg->user_inhibit ? "inhibited" : "enabled");
++		}
++		break;
++	case POWER_SUPPLY_PROP_CHARGE_CONTROL_END_THRESHOLD:
++		if (val->intval < 1 || val->intval > 100 ||
++		    (chg->start_thr && val->intval <= chg->start_thr)) {
++			ret = -EINVAL;
++			break;
++		}
++		chg->end_thr = val->intval;
++		pm7250b_chg_limit_eval(chg);
++		break;
++	case POWER_SUPPLY_PROP_CHARGE_CONTROL_START_THRESHOLD:
++		if (val->intval < 0 || val->intval >= chg->end_thr) {
++			ret = -EINVAL;
++			break;
++		}
++		chg->start_thr = val->intval;
++		pm7250b_chg_limit_eval(chg);
++		break;
++	default:
++		ret = -EINVAL;
++	}
++	mutex_unlock(&chg->lock);
++
++	return ret;
++}
++
++static int pm7250b_chg_writeable(struct power_supply *psy,
++				 enum power_supply_property psp)
++{
++	struct pm7250b_chg *chg = power_supply_get_drvdata(psy);
++
++	return chg->sw_ctrl;
++}
++
++static const enum power_supply_property pm7250b_chg_props[] = {
++	POWER_SUPPLY_PROP_ONLINE,
++	POWER_SUPPLY_PROP_PRESENT,
++	POWER_SUPPLY_PROP_STATUS,
++	POWER_SUPPLY_PROP_CHARGE_TYPE,
++	POWER_SUPPLY_PROP_CHARGE_BEHAVIOUR,
++	POWER_SUPPLY_PROP_CHARGE_CONTROL_START_THRESHOLD,
++	POWER_SUPPLY_PROP_CHARGE_CONTROL_END_THRESHOLD,
++};
++
++static const struct power_supply_desc pm7250b_chg_desc = {
++	.name = "pm7250b-usb",
++	.type = POWER_SUPPLY_TYPE_USB,
++	.charge_behaviours = BIT(POWER_SUPPLY_CHARGE_BEHAVIOUR_AUTO) |
++			     BIT(POWER_SUPPLY_CHARGE_BEHAVIOUR_INHIBIT_CHARGE),
++	.properties = pm7250b_chg_props,
++	.num_properties = ARRAY_SIZE(pm7250b_chg_props),
++	.get_property = pm7250b_chg_get_property,
++	.set_property = pm7250b_chg_set_property,
++	.property_is_writeable = pm7250b_chg_writeable,
++};
++
++static int pm7250b_chg_probe(struct platform_device *pdev)
++{
++	struct power_supply_config cfg = {};
++	struct device *dev = &pdev->dev;
++	struct pm7250b_chg *chg;
++	unsigned int cfg2, cmd, stat;
++	int ret;
++
++	chg = devm_kzalloc(dev, sizeof(*chg), GFP_KERNEL);
++	if (!chg)
++		return -ENOMEM;
++
++	chg->dev = dev;
++	chg->end_thr = 100;
++	mutex_init(&chg->lock);
++
++	ret = devm_delayed_work_autocancel(dev, &chg->limit_work,
++					   pm7250b_chg_limit_work);
++	if (ret)
++		return ret;
++
++	chg->regmap = dev_get_regmap(dev->parent, NULL);
++	if (!chg->regmap)
++		return dev_err_probe(dev, -ENODEV, "no parent regmap\n");
++
++	ret = device_property_read_u32(dev, "reg", &chg->base);
++	if (ret)
++		return dev_err_probe(dev, ret, "no reg property\n");
++
++	/*
++	 * Read-only look at how charge enable is wired. With CHG_EN_SRC = 0
++	 * the command register decides (active high, polarity only applies
++	 * to the hardware pin). Anything else: report only, never write.
++	 */
++	ret = pm7250b_chg_read(chg, CHGR_CFG2, &cfg2);
++	if (!ret)
++		ret = pm7250b_chg_read(chg, CHARGING_ENABLE_CMD, &cmd);
++	if (!ret)
++		ret = pm7250b_chg_read(chg, CHGR_STATUS_1, &stat);
++	if (ret)
++		return dev_err_probe(dev, ret, "cannot read charger registers\n");
++
++	chg->sw_ctrl = !(cfg2 & CHG_EN_SRC_BIT);
++
++	dev_info(dev,
++		 "CHGR_CFG2=0x%02x (CHG_EN_SRC=%s, CHG_EN_POLARITY=%s) ENABLE_CMD=0x%02x STATUS_1=0x%02x: %s\n",
++		 cfg2, (cfg2 & CHG_EN_SRC_BIT) ? "pin" : "command",
++		 (cfg2 & CHG_EN_POLARITY_BIT) ? "1" : "0", cmd, stat,
++		 chg->sw_ctrl ? "charge control via command bit (active high)" :
++				"pin controlled, charge control disabled");
++
++	if (chg->sw_ctrl && device_property_present(dev, "power-supplies")) {
++		chg->gauge = devm_power_supply_get_by_reference(dev, "power-supplies");
++		if (IS_ERR(chg->gauge))
++			return dev_err_probe(dev, PTR_ERR(chg->gauge),
++					     "cannot get the fuel gauge\n");
++	}
++
++	cfg.drv_data = chg;
++	cfg.fwnode = dev_fwnode(dev);
++
++	chg->psy = devm_power_supply_register(dev, &pm7250b_chg_desc, &cfg);
++	if (IS_ERR(chg->psy))
++		return dev_err_probe(dev, PTR_ERR(chg->psy),
++				     "failed to register power supply\n");
++
++	if (chg->gauge)
++		schedule_delayed_work(&chg->limit_work,
++				      msecs_to_jiffies(CHG_LIMIT_POLL_MS));
++
++	return 0;
++}
++
++static const struct of_device_id pm7250b_chg_of_match[] = {
++	{ .compatible = "qcom,pm7250b-charger" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, pm7250b_chg_of_match);
++
++static struct platform_driver pm7250b_chg_driver = {
++	.probe = pm7250b_chg_probe,
++	.driver = {
++		.name = "qcom-pm7250b-charger",
++		.of_match_table = pm7250b_chg_of_match,
++	},
++};
++module_platform_driver(pm7250b_chg_driver);
++
++MODULE_DESCRIPTION("Qualcomm PM7250B charger status and charge inhibit control");
++MODULE_LICENSE("GPL");
