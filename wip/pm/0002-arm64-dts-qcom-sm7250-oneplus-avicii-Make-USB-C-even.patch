@@ -1,0 +1,27 @@
+From 961e0641ad1f54ab53243f5c387cfa10fb3580ef Mon Sep 17 00:00:00 2001
+From: claude <211365301+lazybrar@users.noreply.github.com>
+Date: Wed, 14 Oct 2026 17:51:03 +0530
+Subject: [PATCH 2/2] arm64: dts: qcom: sm7250-oneplus-avicii: Make USB-C
+ events a wakeup source
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ arch/arm64/boot/dts/qcom/sm7250-oneplus-avicii.dts | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/sm7250-oneplus-avicii.dts b/arch/arm64/boot/dts/qcom/sm7250-oneplus-avicii.dts
+index 50bb4d1b4..9f28c8ceb 100644
+--- a/arch/arm64/boot/dts/qcom/sm7250-oneplus-avicii.dts
++++ b/arch/arm64/boot/dts/qcom/sm7250-oneplus-avicii.dts
+@@ -717,6 +717,8 @@ &pm7250b_charger {
+ &pm7250b_typec {
+ 	vdd-pdphy-supply = <&vreg_l2a_3p1>;
+ 
++	wakeup-source;
++
+ 	status = "okay";
+ 
+ 	connector {
+-- 
+2.56.0
+

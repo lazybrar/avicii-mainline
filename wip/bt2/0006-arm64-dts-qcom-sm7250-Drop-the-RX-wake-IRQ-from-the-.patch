@@ -1,0 +1,43 @@
+From 714b534c272190222d462d545b73bf2ee30e8a7a Mon Sep 17 00:00:00 2001
+From: claude <211365301+lazybrar@users.noreply.github.com>
+Date: Wed, 14 Oct 2026 18:30:33 +0530
+Subject: [PATCH 6/7] arm64: dts: qcom: sm7250: Drop the RX wake IRQ from the
+ Bluetooth UART
+
+Requesting gpio41 as the UART wakeup interrupt switches the pin mux to
+GPIO. The default and sleep pinctrl states are identical, so the qup05
+function is never re-applied and the UART receives nothing: the WCN3990
+answers no HCI command (TLMM ctl of gpio41 read 0x3 = GPIO, pull-up).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ arch/arm64/boot/dts/qcom/sm7250.dtsi | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/sm7250.dtsi b/arch/arm64/boot/dts/qcom/sm7250.dtsi
+index cbbd0f3a0..3a933e15a 100644
+--- a/arch/arm64/boot/dts/qcom/sm7250.dtsi
++++ b/arch/arm64/boot/dts/qcom/sm7250.dtsi
+@@ -749,7 +749,8 @@ &config_noc SLAVE_QUP_0 QCOM_ICC_TAG_ACTIVE_ONLY>,
+ 
+ 			/*
+ 			 * Downstream qupv3_se5_4uart (wrapper 0, SE5), gpio38-41:
+-			 * WCN3990 Bluetooth HCI. RX (gpio41) also wakes the host.
++			 * WCN3990 Bluetooth HCI. No RX wake IRQ: requesting gpio41 as an IRQ re-muxes it to GPIO and
++			 * the UART never receives (default == sleep state, so it is not restored).
+ 			 */
+ 			uart5: serial@894000 {
+ 				compatible = "qcom,geni-uart";
+@@ -760,8 +761,7 @@ uart5: serial@894000 {
+ 				pinctrl-0 = <&qup_uart5_default>;
+ 				/* Downstream sleep state is the same as default */
+ 				pinctrl-1 = <&qup_uart5_default>;
+-				interrupts-extended = <&intc GIC_SPI 606 IRQ_TYPE_LEVEL_HIGH>,
+-						      <&tlmm 41 IRQ_TYPE_LEVEL_HIGH>;
++				interrupts = <GIC_SPI 606 IRQ_TYPE_LEVEL_HIGH>;
+ 				interconnects = <&qup_virt MASTER_QUP_CORE_0 QCOM_ICC_TAG_ALWAYS
+ 						 &qup_virt SLAVE_QUP_CORE_0 QCOM_ICC_TAG_ALWAYS>,
+ 						<&gem_noc MASTER_AMPSS_M0 QCOM_ICC_TAG_ACTIVE_ONLY
+-- 
+2.56.0
+

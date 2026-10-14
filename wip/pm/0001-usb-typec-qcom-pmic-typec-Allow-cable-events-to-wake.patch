@@ -1,0 +1,82 @@
+From b00f5397c43d8df0966dd701efa6f598da919f70 Mon Sep 17 00:00:00 2001
+From: claude <211365301+lazybrar@users.noreply.github.com>
+Date: Wed, 14 Oct 2026 17:51:03 +0530
+Subject: [PATCH 1/2] usb: typec: qcom-pmic-typec: Allow cable events to wake
+ the system
+
+Honour a wakeup-source property on the PMIC Type-C node by arming the
+port interrupts as wake sources, so that a cable plug or unplug resumes
+a suspended system.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ .../bindings/usb/qcom,pmic-typec.yaml          |  2 ++
+ .../usb/typec/tcpm/qcom/qcom_pmic_typec_port.c | 18 ++++++++++++++++++
+ 2 files changed, 20 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/usb/qcom,pmic-typec.yaml b/Documentation/devicetree/bindings/usb/qcom,pmic-typec.yaml
+index ba790c448..883409a0c 100644
+--- a/Documentation/devicetree/bindings/usb/qcom,pmic-typec.yaml
++++ b/Documentation/devicetree/bindings/usb/qcom,pmic-typec.yaml
+@@ -33,6 +33,8 @@ properties:
+     $ref: /schemas/connector/usb-connector.yaml#
+     unevaluatedProperties: false
+ 
++  wakeup-source: true
++
+   reg:
+     description: Type-C port and pdphy SPMI register base offsets
+     minItems: 1
+diff --git a/drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_port.c b/drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_port.c
+index d3523435f..72a728afa 100644
+--- a/drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_port.c
++++ b/drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_port.c
+@@ -10,6 +10,7 @@
+ #include <linux/module.h>
+ #include <linux/of.h>
+ #include <linux/platform_device.h>
++#include <linux/property.h>
+ #include <linux/regmap.h>
+ #include <linux/regulator/consumer.h>
+ #include <linux/slab.h>
+@@ -700,6 +701,11 @@ static void qcom_pmic_typec_port_stop(struct pmic_typec *tcpm)
+ 	disable_delayed_work_sync(&pmic_typec_port->cc_debounce_dwork);
+ }
+ 
++static void pmic_typec_port_disable_wake(void *data)
++{
++	disable_irq_wake((long)data);
++}
++
+ int qcom_pmic_typec_port_probe(struct platform_device *pdev,
+ 			       struct pmic_typec *tcpm,
+ 			       const struct pmic_typec_port_resources *res,
+@@ -710,6 +716,7 @@ int qcom_pmic_typec_port_probe(struct platform_device *pdev,
+ 	struct pmic_typec_port_irq_data *irq_data;
+ 	struct pmic_typec_port *pmic_typec_port;
+ 	struct fwnode_handle *connector;
++	bool wakeup = device_property_read_bool(dev, "wakeup-source");
+ 	int i, ret, irq;
+ 
+ 	pmic_typec_port = devm_kzalloc(dev, sizeof(*pmic_typec_port), GFP_KERNEL);
+@@ -766,6 +773,17 @@ int qcom_pmic_typec_port_probe(struct platform_device *pdev,
+ 						irq_data);
+ 		if (ret)
+ 			return ret;
++
++		/* Let a cable plug or unplug wake the system from suspend */
++		if (wakeup) {
++			ret = enable_irq_wake(irq);
++			if (ret)
++				return ret;
++			ret = devm_add_action_or_reset(dev, pmic_typec_port_disable_wake,
++						       (void *)(long)irq);
++			if (ret)
++				return ret;
++		}
+ 	}
+ 
+ 	tcpm->pmic_typec_port = pmic_typec_port;
+-- 
+2.56.0
+

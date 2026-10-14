@@ -1,0 +1,54 @@
+From 8625e7fcef72a08b539ffcc61315a48e9e6b5ca7 Mon Sep 17 00:00:00 2001
+From: claude <211365301+lazybrar@users.noreply.github.com>
+Date: Wed, 14 Oct 2026 18:20:57 +0530
+Subject: [PATCH 3/7] Bluetooth: hci_qca: HACK dump SE5 GENI registers around
+ the WCN3990 power pulses
+
+Evidence: SW_CTRL toggles with the pulses (chip boots), tiocm constant, uart5
+tx:32 rx:0 brk:2, irq158=44, no smmu faults at BT time; clk 7.3728MHz ok.
+Dump raw IOS (pin levels), status, IRQ and DMA RX state to see whether RX
+ever sees activity.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ drivers/bluetooth/hci_qca.c | 16 ++++++++++++++--
+ 1 file changed, 14 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/bluetooth/hci_qca.c b/drivers/bluetooth/hci_qca.c
+index 3e091c305..6c3096e70 100644
+--- a/drivers/bluetooth/hci_qca.c
++++ b/drivers/bluetooth/hci_qca.c
+@@ -1409,6 +1409,17 @@ static void qca_hack_dump(struct hci_uart *hu, const char *what)
+ 	struct qca_serdev *qcadev = serdev_device_get_drvdata(hu->serdev);
+ 	struct qca_power *pw = qcadev->bt_power;
+ 	int i;
++	void __iomem *se = ioremap(0x894000, 0x1000);
++
++	if (se) {
++		bt_dev_info(hu->hdev,
++			    "HACK[%d] SE5 ios=%#x status=%#x m_irq=%#x s_irq=%#x rxfifo=%#x txfifo=%#x dma_en=%#x dma_rx_irq=%#x dma_rx_len=%#x dma_tx_irq=%#x rxcfg=%#x",
++			    qca_hack_attempt, readl(se + 0x908), readl(se + 0x40),
++			    readl(se + 0x610), readl(se + 0x640), readl(se + 0x804),
++			    readl(se + 0x800), readl(se + 0x258), readl(se + 0xd40),
++			    readl(se + 0xd54), readl(se + 0xc40), readl(se + 0x280));
++		iounmap(se);
++	}
+ 
+ 	bt_dev_info(hu->hdev, "HACK[%d] %s: tiocm=%#x swctrl=%d", qca_hack_attempt, what,
+ 		    serdev_device_get_tiocm(hu->serdev),
+@@ -1452,9 +1463,10 @@ static int qca_send_power_pulse(struct hci_uart *hu, bool on)
+ 
+ 	/* Give to controller time to boot/shutdown */
+ 	qca_hack_dump(hu, on ? "after ON pulse" : "after OFF pulse");
+-	if (on)
++	if (on) {
+ 		msleep(100);
+-	else
++		qca_hack_dump(hu, "100ms after ON pulse");
++	} else
+ 		usleep_range(1000, 10000);
+ 
+ 	return 0;
+-- 
+2.56.0
+

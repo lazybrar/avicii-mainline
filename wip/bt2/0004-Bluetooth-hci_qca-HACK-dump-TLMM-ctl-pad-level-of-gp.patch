@@ -1,0 +1,44 @@
+From 883f02be98a44d9a989405b89e510ada4400d13b Mon Sep 17 00:00:00 2001
+From: claude <211365301+lazybrar@users.noreply.github.com>
+Date: Wed, 14 Oct 2026 18:24:09 +0530
+Subject: [PATCH 4/7] Bluetooth: hci_qca: HACK dump TLMM ctl/pad level of
+ gpio38-41 (UART5)
+
+SE5 IOS reads 0 on all lines; read the raw pad state (independent of mux) to
+tell a driven-low/pulled-down RX from an unreliable IOS readout.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ drivers/bluetooth/hci_qca.c | 16 ++++++++++++++++
+ 1 file changed, 16 insertions(+)
+
+diff --git a/drivers/bluetooth/hci_qca.c b/drivers/bluetooth/hci_qca.c
+index 6c3096e70..bf8581b40 100644
+--- a/drivers/bluetooth/hci_qca.c
++++ b/drivers/bluetooth/hci_qca.c
+@@ -1421,6 +1421,22 @@ static void qca_hack_dump(struct hci_uart *hu, const char *what)
+ 		iounmap(se);
+ 	}
+ 
++	{
++		/* raw TLMM pad state: ctl = func[5:2] drive[8:6] pull[1:0] oe[9]; io bit0 = pad in, bit1 = out */
++		void __iomem *tl = ioremap(0xf100000 + 0x1000 * 38, 0x4000);
++
++		if (tl) {
++			bt_dev_info(hu->hdev,
++				    "HACK[%d] TLMM ctl/in 38(cts)=%#x/%d 39(rts)=%#x/%d 40(tx)=%#x/%d 41(rx)=%#x/%d",
++				    qca_hack_attempt,
++				    readl(tl), readl(tl + 4) & 1,
++				    readl(tl + 0x1000), readl(tl + 0x1004) & 1,
++				    readl(tl + 0x2000), readl(tl + 0x2004) & 1,
++				    readl(tl + 0x3000), readl(tl + 0x3004) & 1);
++			iounmap(tl);
++		}
++	}
++
+ 	bt_dev_info(hu->hdev, "HACK[%d] %s: tiocm=%#x swctrl=%d", qca_hack_attempt, what,
+ 		    serdev_device_get_tiocm(hu->serdev),
+ 		    qcadev->sw_ctrl ? gpiod_get_value_cansleep(qcadev->sw_ctrl) : -1);
+-- 
+2.56.0
+

@@ -1,0 +1,80 @@
+From 2d8c4a4da5f61550e5418ecd38d4d9c7fd60d2ca Mon Sep 17 00:00:00 2001
+From: claude <211365301+lazybrar@users.noreply.github.com>
+Date: Wed, 14 Oct 2026 17:54:24 +0530
+Subject: [PATCH 2/7] arm64: dts: avicii: add Bluetooth swctrl-gpios (tlmm 73);
+ hci_qca: drop HACK variants, dump SW_CTRL
+
+OnePlus 12.1 lito.dtsi wcn3990 node has qca,bt-sw-ctrl-gpio = tlmm 73 (older
+tree lacked it); no reset/enable GPIO or clock exists, chip is still WCN3990.
+Read SW_CTRL around the power pulses to show whether the chip ever boots.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ .../arm64/boot/dts/qcom/sm7250-oneplus-avicii.dts |  3 +++
+ drivers/bluetooth/hci_qca.c                       | 15 +++++----------
+ 2 files changed, 8 insertions(+), 10 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/sm7250-oneplus-avicii.dts b/arch/arm64/boot/dts/qcom/sm7250-oneplus-avicii.dts
+index 50bb4d1b4..53c4074cb 100644
+--- a/arch/arm64/boot/dts/qcom/sm7250-oneplus-avicii.dts
++++ b/arch/arm64/boot/dts/qcom/sm7250-oneplus-avicii.dts
+@@ -886,6 +886,9 @@ bluetooth {
+ 		vddrf-supply = <&vreg_l2c_1p3>;
+ 		vddch0-supply = <&vreg_l10c_3p3>;
+ 
++		/* Downstream (OxygenOS 12.1) qca,bt-sw-ctrl-gpio = <&tlmm 73>: chip boot status */
++		swctrl-gpios = <&tlmm 73 GPIO_ACTIVE_HIGH>;
++
+ 		max-speed = <3200000>;
+ 	};
+ };
+diff --git a/drivers/bluetooth/hci_qca.c b/drivers/bluetooth/hci_qca.c
+index 7c8e80ea6..3e091c305 100644
+--- a/drivers/bluetooth/hci_qca.c
++++ b/drivers/bluetooth/hci_qca.c
+@@ -1401,7 +1401,7 @@ static inline void host_set_baudrate(struct hci_uart *hu, unsigned int speed)
+ 		hci_uart_set_baudrate(hu, speed);
+ }
+ 
+-/* HACK(bt2): per-attempt variants + state dump to decide the WCN3990 power-up failure */
++/* HACK(bt2): state dump (tiocm, SW_CTRL gpio, vregs) to decide the WCN3990 power-up failure */
+ static int qca_hack_attempt;
+ 
+ static void qca_hack_dump(struct hci_uart *hu, const char *what)
+@@ -1410,8 +1410,9 @@ static void qca_hack_dump(struct hci_uart *hu, const char *what)
+ 	struct qca_power *pw = qcadev->bt_power;
+ 	int i;
+ 
+-	bt_dev_info(hu->hdev, "HACK[%d] %s: tiocm=%#x", qca_hack_attempt, what,
+-		    serdev_device_get_tiocm(hu->serdev));
++	bt_dev_info(hu->hdev, "HACK[%d] %s: tiocm=%#x swctrl=%d", qca_hack_attempt, what,
++		    serdev_device_get_tiocm(hu->serdev),
++		    qcadev->sw_ctrl ? gpiod_get_value_cansleep(qcadev->sw_ctrl) : -1);
+ 	for (i = 0; i < pw->num_vregs; i++)
+ 		bt_dev_info(hu->hdev, "HACK[%d]   %s en=%d uV=%d", qca_hack_attempt,
+ 			    pw->vreg_bulk[i].supply,
+@@ -1452,7 +1453,7 @@ static int qca_send_power_pulse(struct hci_uart *hu, bool on)
+ 	/* Give to controller time to boot/shutdown */
+ 	qca_hack_dump(hu, on ? "after ON pulse" : "after OFF pulse");
+ 	if (on)
+-		msleep(qca_hack_attempt % 4 == 3 ? 400 : 100);
++		msleep(100);
+ 	else
+ 		usleep_range(1000, 10000);
+ 
+@@ -1819,12 +1820,6 @@ static int qca_regulator_init(struct hci_uart *hu)
+ 	case QCA_WCN3998:
+ 		/* Forcefully enable wcn399x to enter in to boot mode. */
+ 		qca_hack_attempt++;
+-		if (qca_hack_attempt % 4 == 2 || qca_hack_attempt % 4 == 3)
+-			msleep(300); /* HACK: regulators settle before pulse */
+-		if (qca_hack_attempt % 4 == 0 || qca_hack_attempt % 4 == 3) {
+-			bt_dev_info(hu->hdev, "HACK[%d] skipping OFF pulse", qca_hack_attempt);
+-			break;
+-		}
+ 		host_set_baudrate(hu, 2400);
+ 		ret = qca_send_power_pulse(hu, false);
+ 		if (ret)
+-- 
+2.56.0
+

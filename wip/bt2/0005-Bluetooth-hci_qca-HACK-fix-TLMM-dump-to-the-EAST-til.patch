@@ -1,0 +1,42 @@
+From 58e5f3003afc74ace0b20649cb8789cc6f4f251c Mon Sep 17 00:00:00 2001
+From: claude <211365301+lazybrar@users.noreply.github.com>
+Date: Wed, 14 Oct 2026 18:27:41 +0530
+Subject: [PATCH 5/7] Bluetooth: hci_qca: HACK fix TLMM dump to the EAST tile
+ (0xf900000), add i2c0 reference pins
+
+The previous dump read the SOUTH tile (0xf100000) so gpio38-41 showed 0.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ drivers/bluetooth/hci_qca.c | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/bluetooth/hci_qca.c b/drivers/bluetooth/hci_qca.c
+index bf8581b40..c35688a87 100644
+--- a/drivers/bluetooth/hci_qca.c
++++ b/drivers/bluetooth/hci_qca.c
+@@ -1423,16 +1423,18 @@ static void qca_hack_dump(struct hci_uart *hu, const char *what)
+ 
+ 	{
+ 		/* raw TLMM pad state: ctl = func[5:2] drive[8:6] pull[1:0] oe[9]; io bit0 = pad in, bit1 = out */
+-		void __iomem *tl = ioremap(0xf100000 + 0x1000 * 38, 0x4000);
++		void __iomem *tl = ioremap(0xf900000 + 0x1000 * 38, 0x6000) /* EAST tile */;
+ 
+ 		if (tl) {
+ 			bt_dev_info(hu->hdev,
+-				    "HACK[%d] TLMM ctl/in 38(cts)=%#x/%d 39(rts)=%#x/%d 40(tx)=%#x/%d 41(rx)=%#x/%d",
++				    "HACK[%d] TLMM ctl/in 38(cts)=%#x/%d 39(rts)=%#x/%d 40(tx)=%#x/%d 41(rx)=%#x/%d ref42(i2c0)=%#x/%d ref43=%#x/%d",
+ 				    qca_hack_attempt,
+ 				    readl(tl), readl(tl + 4) & 1,
+ 				    readl(tl + 0x1000), readl(tl + 0x1004) & 1,
+ 				    readl(tl + 0x2000), readl(tl + 0x2004) & 1,
+-				    readl(tl + 0x3000), readl(tl + 0x3004) & 1);
++				    readl(tl + 0x3000), readl(tl + 0x3004) & 1,
++				    readl(tl + 0x4000), readl(tl + 0x4004) & 1,
++				    readl(tl + 0x5000), readl(tl + 0x5004) & 1);
+ 			iounmap(tl);
+ 		}
+ 	}
+-- 
+2.56.0
+
