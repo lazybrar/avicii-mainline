@@ -1,0 +1,826 @@
+Subject: Input: Goodix GT9886 touchscreen
+
+Combined diff of the following commits (base v7.3-rc7):
+
+  - Input: add Goodix GT9886 touchscreen driver
+  - Input: goodix_gt9886: ack every frame
+  - Input: goodix_gt9886: drop contacts outside the panel
+  - Input: aw8697 - add Awinic AW8697 haptic driver
+
+---
+ drivers/input/misc/Kconfig                |  13 ++
+ drivers/input/misc/Makefile               |   1 +
+ drivers/input/misc/aw8697.c               | 337 +++++++++++++++++++++++++++++++++++++++++++
+ drivers/input/touchscreen/Kconfig         |  13 ++
+ drivers/input/touchscreen/Makefile        |   1 +
+ drivers/input/touchscreen/goodix_gt9886.c | 387 ++++++++++++++++++++++++++++++++++++++++++++++++++
+ 6 files changed, 752 insertions(+)
+
+diff --git a/drivers/input/misc/Kconfig b/drivers/input/misc/Kconfig
+index 169768e3d..8a0ce2000 100644
+--- a/drivers/input/misc/Kconfig
++++ b/drivers/input/misc/Kconfig
+@@ -941,6 +941,19 @@ config INPUT_DRV260X_HAPTICS
+ 	  To compile this driver as a module, choose M here: the
+ 	  module will be called drv260x-haptics.
+ 
++config INPUT_AW8697_HAPTICS
++	tristate "Awinic AW8697 haptics support"
++	depends on INPUT && I2C
++	select INPUT_FF_MEMLESS
++	select REGMAP_I2C
++	help
++	  Say Y to enable support for the Awinic AW8697 LRA haptic driver
++	  as a force-feedback rumble device. Only the closed-loop continuous
++	  playback mode is supported.
++
++	  To compile this driver as a module, choose M here: the
++	  module will be called aw8697.
++
+ config INPUT_DRV2665_HAPTICS
+ 	tristate "TI DRV2665 haptics support"
+ 	depends on INPUT && I2C
+diff --git a/drivers/input/misc/Makefile b/drivers/input/misc/Makefile
+index 1339619f0..b2f69554c 100644
+--- a/drivers/input/misc/Makefile
++++ b/drivers/input/misc/Makefile
+@@ -38,6 +38,7 @@ obj-$(CONFIG_INPUT_DA9055_ONKEY)	+= da9055_onkey.o
+ obj-$(CONFIG_INPUT_DA9063_ONKEY)	+= da9063_onkey.o
+ obj-$(CONFIG_INPUT_E3X0_BUTTON)		+= e3x0-button.o
+ obj-$(CONFIG_INPUT_DRV260X_HAPTICS)	+= drv260x.o
++obj-$(CONFIG_INPUT_AW8697_HAPTICS)	+= aw8697.o
+ obj-$(CONFIG_INPUT_DRV2665_HAPTICS)	+= drv2665.o
+ obj-$(CONFIG_INPUT_DRV2667_HAPTICS)	+= drv2667.o
+ obj-$(CONFIG_INPUT_GPIO_BEEPER)		+= gpio-beeper.o
+diff --git a/drivers/input/misc/aw8697.c b/drivers/input/misc/aw8697.c
+new file mode 100644
+index 000000000..6b6754e99
+--- /dev/null
++++ b/drivers/input/misc/aw8697.c
+@@ -0,0 +1,337 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Awinic AW8697 haptic driver, rumble only
++ *
++ * Plays the closed-loop continuous (CONT) mode, which needs no waveform
++ * firmware: the chip drives the LRA at its resonance frequency until stopped.
++ * RAM and RTP waveform playback, f0 calibration, the trigger inputs and the
++ * interrupt line are not supported.
++ */
++
++#include <linux/bitfield.h>
++#include <linux/bits.h>
++#include <linux/delay.h>
++#include <linux/gpio/consumer.h>
++#include <linux/i2c.h>
++#include <linux/input.h>
++#include <linux/mod_devicetable.h>
++#include <linux/module.h>
++#include <linux/mutex.h>
++#include <linux/regmap.h>
++#include <linux/workqueue.h>
++
++#define AW8697_REG_ID			0x00
++#define AW8697_CHIPID			0x97
++#define AW8697_SOFT_RESET		0xaa
++
++#define AW8697_REG_SYSINT		0x02
++#define AW8697_REG_SYSINTM		0x03
++#define AW8697_SYSINTM_UVLO		BIT(5)
++
++#define AW8697_REG_SYSCTRL		0x04
++#define AW8697_SYSCTRL_PLAY_MODE	GENMASK(3, 2)
++#define AW8697_PLAY_MODE_CONT		2
++#define AW8697_SYSCTRL_BST_MODE		BIT(1)
++#define AW8697_SYSCTRL_STANDBY		BIT(0)
++
++#define AW8697_REG_GO			0x05
++#define AW8697_GO			BIT(0)
++
++#define AW8697_REG_PWMPRC		0x2d
++#define AW8697_PWMPRC_EN		BIT(7)
++#define AW8697_REG_PWMDBG		0x2e
++#define AW8697_PWMDBG_PWM_MODE		GENMASK(6, 5)
++#define AW8697_PWM_24K			2
++#define AW8697_REG_BSTDBG1		0x31
++#define AW8697_REG_BSTDBG2		0x32
++#define AW8697_REG_BSTDBG3		0x33
++#define AW8697_REG_BSTCFG		0x34
++#define AW8697_BSTCFG_PEAKCUR		GENMASK(2, 0)
++#define AW8697_BSTCFG_PEAKCUR_3P5A	5
++#define AW8697_REG_ANADBG		0x35
++#define AW8697_ANADBG_IOC		GENMASK(3, 2)
++#define AW8697_ANADBG_IOC_4P65A		3
++#define AW8697_REG_PRLVL		0x3e
++#define AW8697_PRLVL_PR_EN		BIT(7)
++
++#define AW8697_REG_BST_AUTO		0x47
++#define AW8697_BST_AUTO_AUTOSW		BIT(2)
++#define AW8697_REG_CONT_CTRL		0x48
++#define AW8697_CONT_CTRL_ZC_DETEC	BIT(7)
++#define AW8697_CONT_CTRL_WAIT_PERIOD	GENMASK(6, 5)
++#define AW8697_CONT_CTRL_BY_DRV_TIME	BIT(4)
++#define AW8697_CONT_CTRL_CLOSE_PLAYBACK	BIT(3)
++#define AW8697_CONT_CTRL_F0_DETECT	BIT(2)
++#define AW8697_CONT_CTRL_O2C		BIT(1)
++#define AW8697_CONT_CTRL_AUTO_BRK	BIT(0)
++#define AW8697_REG_F_PRE_H		0x49
++#define AW8697_REG_F_PRE_L		0x4a
++#define AW8697_REG_TD_H			0x4b
++#define AW8697_REG_TD_L			0x4c
++#define AW8697_REG_TSET			0x4d
++
++#define AW8697_REG_GLB_STATE		0x46
++#define AW8697_GLB_STATE_MASK		GENMASK(3, 0)
++
++#define AW8697_REG_DATCTRL		0x2b
++#define AW8697_DATCTRL_FC		GENMASK(7, 6)
++#define AW8697_DATCTRL_FC_1000HZ	3
++#define AW8697_DATCTRL_LPF_EN		BIT(5)
++
++#define AW8697_REG_R_SPARE		0x5d
++#define AW8697_REG_DETCTRL		0x5f
++#define AW8697_DETCTRL_PROTECT_NO_ACT	BIT(5)
++#define AW8697_REG_ADCTEST		0x66
++#define AW8697_ADCTEST_VBAT_HW_COMP	BIT(6)
++
++#define AW8697_REG_ZC_THRSH_H		0x72
++#define AW8697_REG_ZC_THRSH_L		0x73
++#define AW8697_REG_BEMF_VTHH_H		0x74
++#define AW8697_REG_BEMF_VTHH_L		0x75
++#define AW8697_REG_BEMF_VTHL_H		0x76
++#define AW8697_REG_BEMF_VTHL_L		0x77
++#define AW8697_REG_BEMF_NUM		0x78
++#define AW8697_BEMF_NUM_BRK		GENMASK(3, 0)
++#define AW8697_REG_TIME_NZC		0x7a
++#define AW8697_REG_DRV_LVL		0x7b
++#define AW8697_REG_DRV_LVL_OV		0x7c
++
++/*
++ * Motor tuning of the OnePlus device_id 832 LRA (235 Hz) as used by the
++ * vendor kernel.  The f0 register is 10^9 / (f0 in 0.1 Hz * 260).
++ */
++#define AW8697_F0_PRE_REG		(1000000000 / (2350 * 260))
++#define AW8697_CONT_TD			0x006c
++#define AW8697_CONT_ZC_THR		0x0ff1
++#define AW8697_CONT_NUM_BRK		3
++#define AW8697_CONT_DRV_LVL		105
++#define AW8697_CONT_DRV_LVL_OV		125
++
++struct aw8697 {
++	struct regmap *regmap;
++	struct input_dev *input;
++	struct work_struct work;
++	struct mutex lock;
++	u16 magnitude;
++};
++
++static const struct regmap_config aw8697_regmap_config = {
++	.reg_bits = 8,
++	.val_bits = 8,
++	.max_register = 0x7f,
++	.cache_type = REGCACHE_NONE,
++};
++
++static int aw8697_stop(struct aw8697 *haptic)
++{
++	unsigned int val;
++	int ret;
++
++	regmap_clear_bits(haptic->regmap, AW8697_REG_GO, AW8697_GO);
++
++	/* The chip finishes the braking cycle before it reports standby */
++	ret = regmap_read_poll_timeout(haptic->regmap, AW8697_REG_GLB_STATE, val,
++				       !(val & AW8697_GLB_STATE_MASK), 2000, 400000);
++	if (ret)
++		return ret;
++
++	regmap_set_bits(haptic->regmap, AW8697_REG_SYSINTM, AW8697_SYSINTM_UVLO);
++	return regmap_set_bits(haptic->regmap, AW8697_REG_SYSCTRL,
++			       AW8697_SYSCTRL_STANDBY);
++}
++
++static int aw8697_start(struct aw8697 *haptic, u16 magnitude)
++{
++	struct regmap *map = haptic->regmap;
++	unsigned int dummy;
++
++	/* Weaker magnitudes lower the drive level, 0 stops */
++	regmap_write(map, AW8697_REG_DRV_LVL,
++		     max(1, AW8697_CONT_DRV_LVL * magnitude / 0xffff));
++	regmap_write(map, AW8697_REG_DRV_LVL_OV, AW8697_CONT_DRV_LVL_OV);
++
++	regmap_update_bits(map, AW8697_REG_SYSCTRL,
++			   AW8697_SYSCTRL_PLAY_MODE | AW8697_SYSCTRL_BST_MODE |
++			   AW8697_SYSCTRL_STANDBY,
++			   FIELD_PREP(AW8697_SYSCTRL_PLAY_MODE, AW8697_PLAY_MODE_CONT));
++	regmap_read(map, AW8697_REG_SYSINT, &dummy);	/* clear */
++	regmap_clear_bits(map, AW8697_REG_SYSINTM, AW8697_SYSINTM_UVLO);
++
++	regmap_write(map, AW8697_REG_F_PRE_H, AW8697_F0_PRE_REG >> 8);
++	regmap_write(map, AW8697_REG_F_PRE_L, AW8697_F0_PRE_REG & 0xff);
++
++	regmap_update_bits(map, AW8697_REG_DATCTRL,
++			   AW8697_DATCTRL_FC | AW8697_DATCTRL_LPF_EN,
++			   FIELD_PREP(AW8697_DATCTRL_FC, AW8697_DATCTRL_FC_1000HZ) |
++			   AW8697_DATCTRL_LPF_EN);
++
++	/* Zero-cross detection, stop on GO clear, closed loop, auto brake */
++	regmap_update_bits(map, AW8697_REG_CONT_CTRL,
++			   AW8697_CONT_CTRL_ZC_DETEC | AW8697_CONT_CTRL_WAIT_PERIOD |
++			   AW8697_CONT_CTRL_BY_DRV_TIME | AW8697_CONT_CTRL_CLOSE_PLAYBACK |
++			   AW8697_CONT_CTRL_F0_DETECT | AW8697_CONT_CTRL_O2C |
++			   AW8697_CONT_CTRL_AUTO_BRK,
++			   AW8697_CONT_CTRL_ZC_DETEC | AW8697_CONT_CTRL_CLOSE_PLAYBACK |
++			   AW8697_CONT_CTRL_AUTO_BRK);
++
++	regmap_write(map, AW8697_REG_TD_H, AW8697_CONT_TD >> 8);
++	regmap_write(map, AW8697_REG_TD_L, AW8697_CONT_TD & 0xff);
++	regmap_write(map, AW8697_REG_TSET, 0x12);
++	regmap_write(map, AW8697_REG_ZC_THRSH_H, AW8697_CONT_ZC_THR >> 8);
++	regmap_write(map, AW8697_REG_ZC_THRSH_L, AW8697_CONT_ZC_THR & 0xff);
++	regmap_write(map, AW8697_REG_BEMF_VTHH_H, 0x10);
++	regmap_write(map, AW8697_REG_BEMF_VTHH_L, 0x08);
++	regmap_write(map, AW8697_REG_BEMF_VTHL_H, 0x03);
++	regmap_write(map, AW8697_REG_BEMF_VTHL_L, 0xf8);
++	regmap_update_bits(map, AW8697_REG_BEMF_NUM, AW8697_BEMF_NUM_BRK,
++			   AW8697_CONT_NUM_BRK);
++	regmap_write(map, AW8697_REG_TIME_NZC, 0x23);
++
++	return regmap_set_bits(map, AW8697_REG_GO, AW8697_GO);
++}
++
++static void aw8697_work(struct work_struct *work)
++{
++	struct aw8697 *haptic = container_of(work, struct aw8697, work);
++	struct device *dev = &haptic->input->dev;
++	u16 magnitude = READ_ONCE(haptic->magnitude);
++	int ret;
++
++	guard(mutex)(&haptic->lock);
++
++	ret = aw8697_stop(haptic);
++	if (!ret && magnitude)
++		ret = aw8697_start(haptic, magnitude);
++	if (ret)
++		dev_err(dev, "failed to update vibration: %d\n", ret);
++}
++
++static int aw8697_play_effect(struct input_dev *input, void *data,
++			      struct ff_effect *effect)
++{
++	struct aw8697 *haptic = input_get_drvdata(input);
++
++	WRITE_ONCE(haptic->magnitude, effect->u.rumble.strong_magnitude ?:
++		   effect->u.rumble.weak_magnitude);
++	schedule_work(&haptic->work);
++
++	return 0;
++}
++
++static void aw8697_close(struct input_dev *input)
++{
++	struct aw8697 *haptic = input_get_drvdata(input);
++
++	cancel_work_sync(&haptic->work);
++	guard(mutex)(&haptic->lock);
++	aw8697_stop(haptic);
++}
++
++static int aw8697_init(struct aw8697 *haptic)
++{
++	struct regmap *map = haptic->regmap;
++
++	/* Register values taken from the vendor driver's initialisation */
++	regmap_update_bits(map, AW8697_REG_PWMDBG, AW8697_PWMDBG_PWM_MODE,
++			   FIELD_PREP(AW8697_PWMDBG_PWM_MODE, AW8697_PWM_24K));
++	regmap_write(map, AW8697_REG_BSTDBG1, 0x30);
++	regmap_write(map, AW8697_REG_BSTDBG2, 0xeb);
++	regmap_write(map, AW8697_REG_BSTDBG3, 0xd4);
++	regmap_write(map, AW8697_REG_TSET, 0x12);
++	regmap_write(map, AW8697_REG_R_SPARE, 0x68);
++	regmap_update_bits(map, AW8697_REG_ANADBG, AW8697_ANADBG_IOC,
++			   FIELD_PREP(AW8697_ANADBG_IOC, AW8697_ANADBG_IOC_4P65A));
++	regmap_update_bits(map, AW8697_REG_BSTCFG, AW8697_BSTCFG_PEAKCUR,
++			   AW8697_BSTCFG_PEAKCUR_3P5A);
++
++	/* Motor protection off, manual boost, hardware VBAT compensation */
++	regmap_set_bits(map, AW8697_REG_DETCTRL, AW8697_DETCTRL_PROTECT_NO_ACT);
++	regmap_clear_bits(map, AW8697_REG_PWMPRC, AW8697_PWMPRC_EN);
++	regmap_clear_bits(map, AW8697_REG_PRLVL, AW8697_PRLVL_PR_EN);
++	regmap_clear_bits(map, AW8697_REG_BST_AUTO, AW8697_BST_AUTO_AUTOSW);
++	regmap_set_bits(map, AW8697_REG_ADCTEST, AW8697_ADCTEST_VBAT_HW_COMP);
++
++	return aw8697_stop(haptic);
++}
++
++static int aw8697_probe(struct i2c_client *client)
++{
++	struct device *dev = &client->dev;
++	struct gpio_desc *reset;
++	struct aw8697 *haptic;
++	unsigned int id;
++	int ret;
++
++	haptic = devm_kzalloc(dev, sizeof(*haptic), GFP_KERNEL);
++	if (!haptic)
++		return -ENOMEM;
++
++	haptic->regmap = devm_regmap_init_i2c(client, &aw8697_regmap_config);
++	if (IS_ERR(haptic->regmap))
++		return PTR_ERR(haptic->regmap);
++
++	reset = devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_HIGH);
++	if (IS_ERR(reset))
++		return dev_err_probe(dev, PTR_ERR(reset), "failed to get reset GPIO\n");
++	if (reset) {
++		usleep_range(1000, 2000);
++		gpiod_set_value_cansleep(reset, 0);
++		usleep_range(3500, 4000);
++	}
++
++	ret = regmap_read(haptic->regmap, AW8697_REG_ID, &id);
++	if (ret)
++		return dev_err_probe(dev, ret, "failed to read chip ID\n");
++	if (id != AW8697_CHIPID)
++		return dev_err_probe(dev, -ENODEV, "unexpected chip ID 0x%02x\n", id);
++
++	regmap_write(haptic->regmap, AW8697_REG_ID, AW8697_SOFT_RESET);
++	usleep_range(3000, 3500);
++
++	mutex_init(&haptic->lock);
++	INIT_WORK(&haptic->work, aw8697_work);
++
++	haptic->input = devm_input_allocate_device(dev);
++	if (!haptic->input)
++		return -ENOMEM;
++
++	haptic->input->name = "aw8697-haptics";
++	haptic->input->close = aw8697_close;
++	input_set_drvdata(haptic->input, haptic);
++	input_set_capability(haptic->input, EV_FF, FF_RUMBLE);
++
++	ret = aw8697_init(haptic);
++	if (ret)
++		return dev_err_probe(dev, ret, "failed to initialise the chip\n");
++
++	ret = input_ff_create_memless(haptic->input, NULL, aw8697_play_effect);
++	if (ret)
++		return ret;
++
++	return input_register_device(haptic->input);
++}
++
++static const struct of_device_id aw8697_of_match[] = {
++	{ .compatible = "awinic,aw8697" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, aw8697_of_match);
++
++static const struct i2c_device_id aw8697_id[] = {
++	{ "aw8697" },
++	{ }
++};
++MODULE_DEVICE_TABLE(i2c, aw8697_id);
++
++static struct i2c_driver aw8697_driver = {
++	.driver = {
++		.name = "aw8697-haptics",
++		.of_match_table = aw8697_of_match,
++	},
++	.probe = aw8697_probe,
++	.id_table = aw8697_id,
++};
++module_i2c_driver(aw8697_driver);
++
++MODULE_DESCRIPTION("Awinic AW8697 haptic driver (rumble)");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/input/touchscreen/Kconfig b/drivers/input/touchscreen/Kconfig
+index 9b9ae8ac3..e326684b1 100644
+--- a/drivers/input/touchscreen/Kconfig
++++ b/drivers/input/touchscreen/Kconfig
+@@ -398,6 +398,19 @@ config TOUCHSCREEN_GOODIX
+ 	  To compile this driver as a module, choose M here: the
+ 	  module will be called goodix.
+ 
++config TOUCHSCREEN_GOODIX_GT9886
++	tristate "Goodix GT9886 I2C touchscreen"
++	depends on I2C
++	help
++	  Say Y here if you have a Goodix GT9886 touchscreen connected
++	  to your system via I2C (found on the OnePlus Nord). The driver
++	  uses the firmware and configuration already in the controller.
++
++	  If unsure, say N.
++
++	  To compile this driver as a module, choose M here: the
++	  module will be called goodix_gt9886.
++
+ config TOUCHSCREEN_GOODIX_BERLIN_CORE
+ 	tristate
+ 
+diff --git a/drivers/input/touchscreen/Makefile b/drivers/input/touchscreen/Makefile
+index bfd9de833..ef029f232 100644
+--- a/drivers/input/touchscreen/Makefile
++++ b/drivers/input/touchscreen/Makefile
+@@ -47,6 +47,7 @@ obj-$(CONFIG_TOUCHSCREEN_FUJITSU)	+= fujitsu_ts.o
+ obj-$(CONFIG_TOUCHSCREEN_GOODIX)	+= goodix_ts.o
+ obj-$(CONFIG_TOUCHSCREEN_GOODIX_BERLIN_CORE)	+= goodix_berlin_core.o
+ obj-$(CONFIG_TOUCHSCREEN_GOODIX_BERLIN_I2C)	+= goodix_berlin_i2c.o
++obj-$(CONFIG_TOUCHSCREEN_GOODIX_GT9886)	+= goodix_gt9886.o
+ obj-$(CONFIG_TOUCHSCREEN_GOODIX_BERLIN_SPI)	+= goodix_berlin_spi.o
+ obj-$(CONFIG_TOUCHSCREEN_HIDEEP)	+= hideep.o
+ obj-$(CONFIG_TOUCHSCREEN_HIMAX_HX852X)	+= himax_hx852x.o
+diff --git a/drivers/input/touchscreen/goodix_gt9886.c b/drivers/input/touchscreen/goodix_gt9886.c
+new file mode 100644
+index 000000000..025fb1846
+--- /dev/null
++++ b/drivers/input/touchscreen/goodix_gt9886.c
+@@ -0,0 +1,387 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Goodix GT9886 I2C touchscreen driver
++ *
++ * Minimal driver: it reports multi-touch coordinates using the firmware and
++ * configuration already stored in the controller flash. Firmware/config
++ * upload, gestures and the in-display fingerprint events are not supported.
++ */
++
++#include <linux/delay.h>
++#include <linux/gpio/consumer.h>
++#include <linux/i2c.h>
++#include <linux/input.h>
++#include <linux/input/mt.h>
++#include <linux/input/touchscreen.h>
++#include <linux/interrupt.h>
++#include <linux/module.h>
++#include <linux/mod_devicetable.h>
++#include <linux/regulator/consumer.h>
++#include <linux/unaligned.h>
++
++#define GT9886_REG_COORD		0x4100
++#define GT9886_REG_PRODUCT_VER		0x452c
++#define GT9886_REG_DOZE_CTRL		0x30f0
++#define GT9886_REG_DOZE_STAT		0x3100
++#define GT9886_REG_REQUEST		0x6f6d
++
++#define GT9886_DOZE_ENABLE		0xcc
++#define GT9886_DOZE_DISABLE		0xaa
++#define GT9886_DOZE_CLOSED		0xbb
++
++#define GT9886_EVENT_TOUCH		BIT(7)
++#define GT9886_EVENT_REQUEST		BIT(6)
++
++#define GT9886_MAX_TOUCHES		10
++#define GT9886_COORD_SIZE		8
++/* status, touch count, coordinates, 16 bit checksum */
++#define GT9886_HEADER_SIZE		2
++#define GT9886_TRAILER_SIZE		2
++#define GT9886_MAX_FRAME		(GT9886_HEADER_SIZE + \
++					 GT9886_MAX_TOUCHES * GT9886_COORD_SIZE + \
++					 GT9886_TRAILER_SIZE)
++#define GT9886_PRODUCT_VER_LEN		72
++
++struct gt9886 {
++	struct i2c_client *client;
++	struct input_dev *input;
++	struct gpio_desc *reset_gpio;
++	struct regulator_bulk_data supplies[2];
++	struct touchscreen_properties prop;
++	u8 frame[GT9886_MAX_FRAME];
++};
++
++#define GT9886_I2C_RETRIES	5
++
++static int gt9886_read(struct gt9886 *ts, u16 reg, void *buf, u16 len)
++{
++	u8 addr[2] = { reg >> 8, reg & 0xff };
++	struct i2c_msg msgs[] = {
++		{ .addr = ts->client->addr, .len = sizeof(addr), .buf = addr },
++		{ .addr = ts->client->addr, .flags = I2C_M_RD, .len = len, .buf = buf },
++	};
++	int i, ret = -EIO;
++
++	/* the controller NAKs now and then while it wakes up from doze */
++	for (i = 0; i < GT9886_I2C_RETRIES; i++) {
++		ret = i2c_transfer(ts->client->adapter, msgs, ARRAY_SIZE(msgs));
++		if (ret == ARRAY_SIZE(msgs))
++			return 0;
++		msleep(20);
++	}
++
++	return ret < 0 ? ret : -EIO;
++}
++
++static int gt9886_write(struct gt9886 *ts, u16 reg, u8 val)
++{
++	u8 buf[3] = { reg >> 8, reg & 0xff, val };
++	int i, ret = -EIO;
++
++	for (i = 0; i < GT9886_I2C_RETRIES; i++) {
++		ret = i2c_master_send(ts->client, buf, sizeof(buf));
++		if (ret == sizeof(buf))
++			return 0;
++		msleep(20);
++	}
++
++	return ret < 0 ? ret : -EIO;
++}
++
++/* The controller NAKs register access while dozing: wake it up first */
++static int gt9886_doze_disable(struct gt9886 *ts)
++{
++	u8 stat;
++	int i, ret;
++
++	ret = gt9886_write(ts, GT9886_REG_DOZE_CTRL, GT9886_DOZE_DISABLE);
++	if (ret)
++		return ret;
++
++	usleep_range(8000, 9000);
++
++	for (i = 0; i < 20; i++) {
++		ret = gt9886_read(ts, GT9886_REG_DOZE_STAT, &stat, 1);
++		if (ret)
++			return ret;
++		if (stat == GT9886_DOZE_CLOSED)
++			return 0;
++
++		if (stat != GT9886_DOZE_DISABLE) {
++			ret = gt9886_write(ts, GT9886_REG_DOZE_CTRL,
++					   GT9886_DOZE_DISABLE);
++			if (ret)
++				return ret;
++		}
++		if (i > 5)
++			gt9886_write(ts, GT9886_REG_COORD, 0);
++		usleep_range(10000, 11000);
++	}
++
++	return -ETIMEDOUT;
++}
++
++static void gt9886_doze_enable(struct gt9886 *ts)
++{
++	gt9886_write(ts, GT9886_REG_DOZE_CTRL, GT9886_DOZE_ENABLE);
++}
++
++static void gt9886_reset(struct gt9886 *ts)
++{
++	gpiod_set_value_cansleep(ts->reset_gpio, 1);
++	usleep_range(2000, 3000);
++	gpiod_set_value_cansleep(ts->reset_gpio, 0);
++	msleep(100);
++}
++
++static int gt9886_read_version(struct gt9886 *ts)
++{
++	struct device *dev = &ts->client->dev;
++	u8 buf[GT9886_PRODUCT_VER_LEN];
++	u8 sum;
++	int i, ret = -EIO;
++
++	for (i = 0; i < 5; i++) {
++		int j;
++
++		ret = gt9886_doze_disable(ts);
++		if (!ret) {
++			ret = gt9886_read(ts, GT9886_REG_PRODUCT_VER, buf,
++					  sizeof(buf));
++			gt9886_doze_enable(ts);
++		}
++		if (!ret) {
++			for (sum = 0, j = 0; j < sizeof(buf); j++)
++				sum += buf[j];
++			/* the version block sums to zero; byte 21 is the sensor id */
++			if (!sum && buf[21] != 0xff)
++				break;
++			ret = -EPROTO;
++		}
++		msleep(100);
++	}
++	if (ret)
++		return dev_err_probe(dev, ret, "cannot read product version\n");
++
++	dev_info(dev, "GT%.4s, patch %08x, mask %06x, sensor id %u\n",
++		 &buf[9], get_unaligned_be32(&buf[17]),
++		 get_unaligned_be24(&buf[6]), buf[21] & 0x0f);
++
++	return 0;
++}
++
++static void gt9886_handle_request(struct gt9886 *ts)
++{
++	struct device *dev = &ts->client->dev;
++	u8 req;
++
++	if (gt9886_read(ts, GT9886_REG_REQUEST, &req, 1))
++		return;
++
++	switch (req) {
++	case 0x03: /* reset */
++		gt9886_reset(ts);
++		return;
++	case 0x01: /* configuration, not supported */
++		dev_warn_ratelimited(dev, "firmware requests a configuration\n");
++		break;
++	}
++
++	gt9886_write(ts, GT9886_REG_REQUEST, 0);
++}
++
++static irqreturn_t gt9886_irq(int irq, void *data)
++{
++	struct gt9886 *ts = data;
++	u8 *buf = ts->frame;
++	int i, n, len, ret;
++	u8 sum;
++
++	ret = gt9886_read(ts, GT9886_REG_COORD, buf,
++			  GT9886_HEADER_SIZE + GT9886_COORD_SIZE +
++			  GT9886_TRAILER_SIZE);
++	if (ret)
++		return IRQ_HANDLED;
++
++	if (buf[0] & GT9886_EVENT_REQUEST) {
++		gt9886_handle_request(ts);
++		goto ack;
++	}
++
++	/* idle, gesture and status frames: nothing to report, but still ack */
++	if (!(buf[0] & GT9886_EVENT_TOUCH))
++		goto ack;
++
++	n = min_t(int, buf[1] & 0x0f, GT9886_MAX_TOUCHES);
++	len = GT9886_HEADER_SIZE + n * GT9886_COORD_SIZE + GT9886_TRAILER_SIZE;
++	if (n > 1) {
++		ret = gt9886_read(ts, GT9886_REG_COORD, buf, len);
++		if (ret)
++			return IRQ_HANDLED;
++	}
++
++	for (sum = 0, i = 0; i < len; i++)
++		sum += buf[i];
++	if (sum)
++		goto ack;
++
++	for (i = 0; i < n; i++) {
++		const u8 *c = &buf[GT9886_HEADER_SIZE + i * GT9886_COORD_SIZE];
++
++		/* the controller now and then pads a contact with filler bytes */
++		if (get_unaligned_le16(&c[1]) > ts->prop.max_x ||
++		    get_unaligned_le16(&c[3]) > ts->prop.max_y)
++			continue;
++
++		input_mt_slot(ts->input, c[0] & 0x0f);
++		input_mt_report_slot_state(ts->input, MT_TOOL_FINGER, true);
++		touchscreen_report_pos(ts->input, &ts->prop,
++				       get_unaligned_le16(&c[1]),
++				       get_unaligned_le16(&c[3]), true);
++		input_report_abs(ts->input, ABS_MT_PRESSURE, c[5]);
++		input_report_abs(ts->input, ABS_MT_TOUCH_MAJOR, c[6]);
++	}
++
++	input_mt_sync_frame(ts->input);
++	input_sync(ts->input);
++
++ack:
++	gt9886_write(ts, GT9886_REG_COORD, 0);
++
++	return IRQ_HANDLED;
++}
++
++static void gt9886_power_off(void *data)
++{
++	struct gt9886 *ts = data;
++
++	gpiod_set_value_cansleep(ts->reset_gpio, 1);
++	regulator_bulk_disable(ARRAY_SIZE(ts->supplies), ts->supplies);
++}
++
++static int gt9886_probe(struct i2c_client *client)
++{
++	struct device *dev = &client->dev;
++	struct gt9886 *ts;
++	int ret;
++
++	ts = devm_kzalloc(dev, sizeof(*ts), GFP_KERNEL);
++	if (!ts)
++		return -ENOMEM;
++
++	ts->client = client;
++	i2c_set_clientdata(client, ts);
++
++	ts->supplies[0].supply = "vdd";
++	ts->supplies[1].supply = "vddio";
++	ret = devm_regulator_bulk_get(dev, ARRAY_SIZE(ts->supplies), ts->supplies);
++	if (ret)
++		return dev_err_probe(dev, ret, "cannot get supplies\n");
++
++	ts->reset_gpio = devm_gpiod_get(dev, "reset", GPIOD_OUT_HIGH);
++	if (IS_ERR(ts->reset_gpio))
++		return dev_err_probe(dev, PTR_ERR(ts->reset_gpio),
++				     "cannot get reset gpio\n");
++
++	ret = regulator_bulk_enable(ARRAY_SIZE(ts->supplies), ts->supplies);
++	if (ret)
++		return dev_err_probe(dev, ret, "cannot enable supplies\n");
++
++	ret = devm_add_action_or_reset(dev, gt9886_power_off, ts);
++	if (ret)
++		return ret;
++
++	msleep(20);
++	gt9886_reset(ts);
++
++	ret = gt9886_read_version(ts);
++	if (ret)
++		return ret;
++
++	ts->input = devm_input_allocate_device(dev);
++	if (!ts->input)
++		return -ENOMEM;
++
++	ts->input->name = "Goodix GT9886 Touchscreen";
++	ts->input->id.bustype = BUS_I2C;
++
++	input_set_abs_params(ts->input, ABS_MT_POSITION_X, 0, 0, 0, 0);
++	input_set_abs_params(ts->input, ABS_MT_POSITION_Y, 0, 0, 0, 0);
++	input_set_abs_params(ts->input, ABS_MT_PRESSURE, 0, 255, 0, 0);
++	input_set_abs_params(ts->input, ABS_MT_TOUCH_MAJOR, 0, 255, 0, 0);
++	touchscreen_parse_properties(ts->input, true, &ts->prop);
++	if (!ts->prop.max_x || !ts->prop.max_y)
++		return dev_err_probe(dev, -EINVAL,
++				     "touchscreen-size-x/y are required\n");
++
++	ret = input_mt_init_slots(ts->input, GT9886_MAX_TOUCHES,
++				  INPUT_MT_DIRECT | INPUT_MT_DROP_UNUSED);
++	if (ret)
++		return ret;
++
++	ret = input_register_device(ts->input);
++	if (ret)
++		return ret;
++
++	ret = devm_request_threaded_irq(dev, client->irq, NULL, gt9886_irq,
++					IRQF_ONESHOT, client->name, ts);
++	if (ret)
++		return dev_err_probe(dev, ret, "cannot request irq\n");
++
++	return 0;
++}
++
++static int gt9886_suspend(struct device *dev)
++{
++	struct gt9886 *ts = dev_get_drvdata(dev);
++
++	disable_irq(ts->client->irq);
++	gpiod_set_value_cansleep(ts->reset_gpio, 1);
++	regulator_bulk_disable(ARRAY_SIZE(ts->supplies), ts->supplies);
++
++	return 0;
++}
++
++static int gt9886_resume(struct device *dev)
++{
++	struct gt9886 *ts = dev_get_drvdata(dev);
++	int ret;
++
++	ret = regulator_bulk_enable(ARRAY_SIZE(ts->supplies), ts->supplies);
++	if (ret)
++		return ret;
++
++	msleep(20);
++	gt9886_reset(ts);
++	enable_irq(ts->client->irq);
++
++	return 0;
++}
++
++static DEFINE_SIMPLE_DEV_PM_OPS(gt9886_pm_ops, gt9886_suspend, gt9886_resume);
++
++static const struct of_device_id gt9886_of_match[] = {
++	{ .compatible = "goodix,gt9886" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, gt9886_of_match);
++
++static const struct i2c_device_id gt9886_id[] = {
++	{ "gt9886" },
++	{ }
++};
++MODULE_DEVICE_TABLE(i2c, gt9886_id);
++
++static struct i2c_driver gt9886_driver = {
++	.driver = {
++		.name = "goodix-gt9886",
++		.of_match_table = gt9886_of_match,
++		.pm = pm_sleep_ptr(&gt9886_pm_ops),
++	},
++	.probe = gt9886_probe,
++	.id_table = gt9886_id,
++};
++module_i2c_driver(gt9886_driver);
++
++MODULE_DESCRIPTION("Goodix GT9886 I2C touchscreen driver");
++MODULE_LICENSE("GPL");

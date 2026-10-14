@@ -1,9 +1,11 @@
 #!/bin/bash
-# mkpublish.sh OUTDIR: assemble the public repository contents (patches, configs, scripts) from the
+# mkpublish.sh OUTDIR [BRANCH]: assemble the public repository contents (patches, configs, scripts) from the
 # working tree. Kernel changes are exported as one patch per subsystem against the base tag.
 set -e
-TOP=$(dirname "$(dirname "$(dirname "$(readlink -f "$0")")")"); L=$TOP/linux; M=$L/mainline; K=$M/linux-audio
-OUT=$(readlink -f "$1"); BASE=v7.3-rc7; BR=audio
+TOP=$(dirname "$(dirname "$(dirname "$(readlink -f "$0")")")"); L=$TOP/linux; M=$L/mainline; 
+OUT=$(readlink -f "$1"); BASE=v7.3-rc7; BR=${2:-publish-2026-10-14}
+K=$(git -C "$M/linux" worktree list --porcelain | awk -v b="refs/heads/$BR" '/^worktree /{w=$2} $1=="branch"&&$2==b{print w}')
+[ -n "$K" ] || { echo "branch $BR is not checked out in a worktree"; exit 1; }
 rm -rf "$OUT"/{patches,config,scripts,phone,tools,initramfs}; mkdir -p "$OUT"/{patches,config,scripts,phone,tools,initramfs}
 n=0
 topic() { # topic NAME TITLE PATH...
@@ -16,6 +18,7 @@ topic() { # topic NAME TITLE PATH...
 topic bindings   "dt-bindings for SM7250 and OnePlus avicii" Documentation include
 topic clk        "clk: qcom: SM7250 clock controllers" drivers/clk
 topic pinctrl    "pinctrl: qcom: SM7250 TLMM" drivers/pinctrl
+topic interconnect "interconnect: qcom: SM7250 RPMh NoC" drivers/interconnect
 topic soc-pm     "soc/pmdomain/phy: qcom: SM7250 support" drivers/soc drivers/pmdomain drivers/phy
 topic ufs        "ufs: qcom: SM7250 fixes" drivers/ufs
 topic display    "drm: SM7250 display, Samsung AMS644VK04 panel, Adreno 620" drivers/gpu
@@ -23,8 +26,8 @@ topic iommu      "iommu/arm-smmu-qcom: SM7250 GPU SMMU" drivers/iommu
 topic power      "power: supply: PM7250B charger, BQ27411 gauge" drivers/power
 topic touch      "Input: Goodix GT9886 touchscreen" drivers/input
 topic remoteproc "remoteproc: qcom: pas: SM7250 ADSP" drivers/remoteproc
-topic qrtr-hack  "HACK: net: qrtr: ns: retry announcing local servers" net
 topic audio      "ASoC: codecs: NXP/Goodix TFA9874 amplifier" sound
+topic media    "media/i2c: SM7250 camera: camss, CCI, hi846 (untested)" drivers/media drivers/i2c
 topic dts        "arm64: dts: qcom: SM7250 and OnePlus Nord (avicii)" arch
 # every changed file must be in exactly one patch
 a=$(git -C "$K" diff --name-only $BASE..$BR | sort); b=$(grep -h '^diff --git' "$OUT"/patches/*.patch | sed 's|^diff --git a/\(.*\) b/.*|\1|' | sort)

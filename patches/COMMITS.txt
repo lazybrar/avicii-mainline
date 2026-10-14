@@ -62,3 +62,57 @@ e35fe1081 ASoC: dt-bindings: Add NXP/Goodix TFA9874 amplifier
 8b493cd7b arm64: dts: qcom: sm7250-oneplus-avicii: Add speaker playback via Primary MI2S
 4a53ccbba arm64: dts: qcom: sm7250: Add ADSP FastRPC node
 ccfe04c9c dt-bindings: use a public contact address for the new SM7250 bindings
+bd8362a9c arm64: dts: qcom: sm7250-oneplus-avicii: Add camera flash LED
+80198ae01 arm64: dts: qcom: sm7250: Add QUP UART5 for Bluetooth
+e45e52ae5 arm64: dts: qcom: sm7250-oneplus-avicii: Add WCN3990 Bluetooth
+e9ae567fd arm64: dts: qcom: sm7250-oneplus-avicii: Add alert slider
+cf76dc551 arm64: dts: qcom: sm7250: Add QUP wrapper 0 SE0 I2C controller
+8db53f97e Input: aw8697 - add Awinic AW8697 haptic driver
+05db86530 arm64: dts: qcom: sm7250-oneplus-avicii: Add AW8697 vibrator
+2590cbf9b arm64: dts: qcom: sm7250: Fix cpu-map core node names
+6200c0b91 arm64: dts: qcom: sm7250: Fix cluster idle state PSCI parameters
+3a136bbe0 arm64: dts: qcom: sm7250: Add GPU thermal throttling trip
+444aa9d92 dt-bindings: remoteproc: qcom,sm6350-pas: Add SM7250 CDSP
+432129960 remoteproc: qcom: pas: Add SM7250 CDSP support
+6d20ab271 arm64: dts: qcom: sm7250: Add CDSP and its FastRPC node
+bcd8ff804 arm64: dts: qcom: sm7250-oneplus-avicii: Enable CDSP
+52fcd1dc2 dt-bindings: nvmem: qfprom: Add SM7250 compatible
+0a14f2523 arm64: dts: qcom: sm7250: Add qfprom with GPU speed-bin cell
+5a16522be drm/msm/adreno: Add speedbins table for Adreno 620
+bc87155eb arm64: dts: qcom: sm7250: Add speed-bin support to GPU OPP table
+52682ad09 dt-bindings: clock: qcom: Document the SM7250 video clock controller
+df8b4f391 clk: qcom: Add SM7250 video clock controller driver
+6baef2eb4 media: venus: Make the interconnect paths optional
+cd2451696 media: dt-bindings: Add Qualcomm SM7250 Venus video codec
+89bc974ae media: venus: Add SM7250 support
+f2bd88e23 arm64: dts: qcom: sm7250: Add video clock controller and Venus
+fcfaa41c1 arm64: dts: qcom: sm7250-oneplus-avicii: Enable the video codec
+78807c08b arm64: dts: qcom: sm7250-oneplus-avicii: Add serial alias for the Bluetooth UART
+3d1e5fb06 dt-bindings: interconnect: qcom: Add SM7250 RPMh NoC bindings
+a55e65674 interconnect: qcom: Add SM7250 interconnect provider driver
+1936be1ee arm64: dts: qcom: sm7250: Add RPMh interconnect providers
+346eef011 clk: qcom: videocc-sm7250: Match lito GDSC flags and add XO clock
+8b1a894a3 media: venus: Unmask WD and CPU interrupts on Iris1
+e80ddb607 media: venus: sm7250: Add max_load and Iris1 clock config preset
+6abdcc865 fixup! interconnect: qcom: Add SM7250 interconnect provider driver
+d0db9af1f arm64: dts: qcom: sm7250: Wire up interconnect paths for consumers
+2fd4472f4 dt-bindings: clock: qcom: Add SM7250 camera clock controller
+b977710a7 clk: qcom: Add camera clock controller driver for SM7250
+7c8960cb0 dt-bindings: i2c: qcom-cci: Document SM7250 compatible
+449c42321 i2c: qcom-cci: Add SM7250 compatible
+5baa1042a fixup! arm64: dts: qcom: sm7250: Wire up interconnect paths for consumers
+8e13d3b9e dt-bindings: media: camss: Add SM7250 camera subsystem
+116d06011 media: qcom: camss: Add SM7250 support
+6cac1e0b1 arm64: dts: qcom: sm7250: Add interconnect paths to venus
+63cb003af arm64: dts: qcom: sm7250: Identity map the continuous splash buffer for mdss
+c68fa2dba arm64: dts: qcom: sm7250: Add camera clock controller, CCI and CAMSS
+bd1d45fd6 arm64: dts: qcom: sm7250-oneplus-avicii: Add the hi846 ultrawide camera
+e7f813b0b HACK: debug PAS load
+58575d73f remoteproc: qcom_q6v5_pas: Do not auto-boot the SM7250 CDSP
+a96b43056 arm64: dts: qcom: sm7250-oneplus-avicii: Use sdm845-style Bluetooth UART pulls, set max-speed
+0b72029ae HACK: drm/msm/dpu: msm.tc_sync_cfg_height debug override
+50c572c03 arm64: dts: qcom: sm7250: Fix CDSP/CVP reserved regions to OnePlus OxygenOS 12 map
+dc62e9dd2 Revert "HACK: drm/msm/dpu: msm.tc_sync_cfg_height debug override"
+fb0673e6d Revert "HACK: debug PAS load"
+35c9ae503 Revert "HACK: net: qrtr: ns: retry announcing local servers after a remote HELLO"
+a58ded3d7 dt-bindings: use the GitHub noreply address in maintainer entries

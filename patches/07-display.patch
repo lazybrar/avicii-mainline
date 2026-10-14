@@ -7,9 +7,12 @@ Combined diff of the following commits (base v7.3-rc7):
   - drm/msm/adreno: add Adreno 620 (0x06020000) catalog entry
   - drm/msm/a6xx: add the a620 bandwidth table for the GMU
   - drm/msm/a6xx: program the PDC sequencer on a620
+  - drm/msm/adreno: Add speedbins table for Adreno 620
+  - HACK: drm/msm/dpu: msm.tc_sync_cfg_height debug override
+  - Revert "HACK: drm/msm/dpu: msm.tc_sync_cfg_height debug override"
 
 ---
- drivers/gpu/drm/msm/adreno/a6xx_catalog.c              |  20 ++
+ drivers/gpu/drm/msm/adreno/a6xx_catalog.c              |  25 ++
  drivers/gpu/drm/msm/adreno/a6xx_gmu.c                  |  22 +-
  drivers/gpu/drm/msm/adreno/a6xx_hfi.c                  |  33 +++
  drivers/gpu/drm/msm/adreno/adreno_gpu.h                |   5 +
@@ -21,13 +24,13 @@ Combined diff of the following commits (base v7.3-rc7):
  drivers/gpu/drm/panel/Kconfig                          |  12 +
  drivers/gpu/drm/panel/Makefile                         |   1 +
  drivers/gpu/drm/panel/panel-samsung-ams644vk04.c       | 472 +++++++++++++++++++++++++++++++++++++
- 12 files changed, 906 insertions(+), 6 deletions(-)
+ 12 files changed, 911 insertions(+), 6 deletions(-)
 
 diff --git a/drivers/gpu/drm/msm/adreno/a6xx_catalog.c b/drivers/gpu/drm/msm/adreno/a6xx_catalog.c
-index 90a0c7ffb..dcaa3195d 100644
+index 90a0c7ffb..fb6d4bf1e 100644
 --- a/drivers/gpu/drm/msm/adreno/a6xx_catalog.c
 +++ b/drivers/gpu/drm/msm/adreno/a6xx_catalog.c
-@@ -885,6 +885,26 @@ static const struct adreno_info a6xx_gpus[] = {
+@@ -885,6 +885,31 @@ static const struct adreno_info a6xx_gpus[] = {
  			{ 169, 2 },
  			{ 180, 1 },
  		),
@@ -51,6 +54,11 @@ index 90a0c7ffb..dcaa3195d 100644
 +			.gmu_cgc_mode = 0x00020200,
 +			.prim_fifo_threshold = 0x00010000,
 +		},
++		.speedbins = ADRENO_SPEEDBINS(
++			{ 0,   0 },
++			{ 132, 1 },
++			{ 115, 3 },
++		),
  	}, {
  		.chip_ids = ADRENO_CHIP_IDS(0x06020100),
  		.family = ADRENO_6XX_GEN3,

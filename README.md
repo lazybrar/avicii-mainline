@@ -95,3 +95,12 @@ partition can brick the device.
 
 Kernel patches: GPL-2.0-only, like the Linux kernel. Scripts and tools in this repository:
 GPL-2.0-only unless a file says otherwise. See `LICENSE`.
+
+## Status update, 2026-10-14
+
+Patches now come from `v7.3-rc7..publish-2026-10-14` (debug/HACK commits reverted).
+
+- Verified on the device: 8 CPUs (cpufreq, idle, correct capacities), UFS, display (known issue: compositor "commit busy" errors), Adreno 620 (Turnip Vulkan, fuse speed-bin, thermal throttling), touch, USB 2.0, Wi-Fi, ADSP + speaker, SSC sensors (accel, light, proximity, magnetometer), RPMh interconnect, charger + gauge, keys, alert slider.
+- In these patches but not yet working: CDSP and Venus (TrustZone rejects PAS mem_setup, -22), cameras (camcc/CCI/camss probe; hi846 does not answer yet).
+- Working on separate branches, not in these patches yet: s2idle suspend/resume; Bluetooth (the chip is a WCN3991; the UART RX wake IRQ must not be on gpio41).
+- Not started: microphone capture, gyroscope. USB is 2.0 per spec.

@@ -26,34 +26,56 @@ Combined diff of the following commits (base v7.3-rc7):
   - dt-bindings: remoteproc: qcom,sm6350-pas: Add SM7250 ADSP
   - ASoC: dt-bindings: Add NXP/Goodix TFA9874 amplifier
   - dt-bindings: use a public contact address for the new SM7250 bindings
+  - Input: aw8697 - add Awinic AW8697 haptic driver
+  - dt-bindings: remoteproc: qcom,sm6350-pas: Add SM7250 CDSP
+  - dt-bindings: nvmem: qfprom: Add SM7250 compatible
+  - dt-bindings: clock: qcom: Document the SM7250 video clock controller
+  - media: dt-bindings: Add Qualcomm SM7250 Venus video codec
+  - dt-bindings: interconnect: qcom: Add SM7250 RPMh NoC bindings
+  - clk: qcom: videocc-sm7250: Match lito GDSC flags and add XO clock
+  - dt-bindings: clock: qcom: Add SM7250 camera clock controller
+  - dt-bindings: i2c: qcom-cci: Document SM7250 compatible
+  - dt-bindings: media: camss: Add SM7250 camera subsystem
+  - dt-bindings: use the GitHub noreply address in maintainer entries
 
 ---
  Documentation/devicetree/bindings/clock/qcom,gpucc.yaml         |   2 +
  Documentation/devicetree/bindings/clock/qcom,rpmhcc.yaml        |   1 +
  Documentation/devicetree/bindings/clock/qcom,sm6375-gcc.yaml    |   6 +-
- Documentation/devicetree/bindings/clock/qcom,sm7250-dispcc.yaml |  73 +++++++++++++
+ Documentation/devicetree/bindings/clock/qcom,sm7250-camcc.yaml  |  78 ++++++++
+ Documentation/devicetree/bindings/clock/qcom,sm7250-dispcc.yaml |  73 +++++++
+ .../devicetree/bindings/clock/qcom,sm7250-videocc.yaml          |  58 ++++++
  Documentation/devicetree/bindings/cpufreq/cpufreq-qcom-hw.yaml  |   1 +
  .../devicetree/bindings/display/msm/dsi-controller-main.yaml    |   2 +
  Documentation/devicetree/bindings/display/msm/gmu.yaml          |   1 +
- .../devicetree/bindings/display/panel/samsung,ams644vk04.yaml   |  73 +++++++++++++
+ .../devicetree/bindings/display/panel/samsung,ams644vk04.yaml   |  73 +++++++
  Documentation/devicetree/bindings/firmware/qcom,scm.yaml        |   1 +
- .../devicetree/bindings/input/touchscreen/goodix,gt9886.yaml    |  67 ++++++++++++
+ Documentation/devicetree/bindings/i2c/qcom,i2c-cci.yaml         |   2 +
+ Documentation/devicetree/bindings/input/awinic,aw8697.yaml      |  48 +++++
+ .../devicetree/bindings/input/touchscreen/goodix,gt9886.yaml    |  67 +++++++
+ .../devicetree/bindings/interconnect/qcom,sm7250-rpmh.yaml      | 102 ++++++++++
  .../devicetree/bindings/interrupt-controller/qcom,pdc.yaml      |   1 +
  Documentation/devicetree/bindings/iommu/arm,smmu.yaml           |   1 +
  Documentation/devicetree/bindings/mailbox/qcom-ipcc.yaml        |   1 +
+ Documentation/devicetree/bindings/media/qcom,sm7250-camss.yaml  | 291 ++++++++++++++++++++++++++++
+ Documentation/devicetree/bindings/media/qcom,sm7250-venus.yaml  | 145 ++++++++++++++
+ Documentation/devicetree/bindings/nvmem/qcom,qfprom.yaml        |   1 +
  .../devicetree/bindings/phy/qcom,sc8280xp-qmp-ufs-phy.yaml      |   2 +
- Documentation/devicetree/bindings/pinctrl/qcom,sm7250-tlmm.yaml | 158 +++++++++++++++++++++++++++
+ Documentation/devicetree/bindings/pinctrl/qcom,sm7250-tlmm.yaml | 158 +++++++++++++++
  Documentation/devicetree/bindings/power/qcom,rpmpd.yaml         |   1 +
- .../devicetree/bindings/power/supply/qcom,pm7250b-charger.yaml  |  44 ++++++++
- .../devicetree/bindings/remoteproc/qcom,sm6350-pas.yaml         |   5 +
- Documentation/devicetree/bindings/sound/nxp,tfa9874.yaml        |  62 +++++++++++
+ .../devicetree/bindings/power/supply/qcom,pm7250b-charger.yaml  |  44 +++++
+ .../devicetree/bindings/remoteproc/qcom,sm6350-pas.yaml         |  21 ++
+ Documentation/devicetree/bindings/sound/nxp,tfa9874.yaml        |  62 ++++++
  Documentation/devicetree/bindings/thermal/qcom-tsens.yaml       |   1 +
  Documentation/devicetree/bindings/ufs/qcom,sc7180-ufshc.yaml    |   2 +
  include/dt-bindings/arm/qcom,ids.h                              |   1 +
- include/dt-bindings/clock/qcom,gpucc-sm7250.h                   |  36 ++++++
- include/dt-bindings/clock/qcom,sm7250-dispcc.h                  |  62 +++++++++++
- include/dt-bindings/clock/qcom,sm7250-gcc.h                     | 163 ++++++++++++++++++++++++++++
- 25 files changed, 765 insertions(+), 2 deletions(-)
+ include/dt-bindings/clock/qcom,camcc-sm7250.h                   | 111 +++++++++++
+ include/dt-bindings/clock/qcom,gpucc-sm7250.h                   |  36 ++++
+ include/dt-bindings/clock/qcom,sm7250-dispcc.h                  |  62 ++++++
+ include/dt-bindings/clock/qcom,sm7250-gcc.h                     | 163 ++++++++++++++++
+ include/dt-bindings/clock/qcom,sm7250-videocc.h                 |  36 ++++
+ include/dt-bindings/interconnect/qcom,sm7250-rpmh.h             | 151 +++++++++++++++
+ 36 files changed, 1804 insertions(+), 2 deletions(-)
 
 diff --git a/Documentation/devicetree/bindings/clock/qcom,gpucc.yaml b/Documentation/devicetree/bindings/clock/qcom,gpucc.yaml
 index 3ac441900..d262455f3 100644
@@ -111,6 +133,90 @@ index 66dfa72fa..ca408c3b5 100644
  
    clocks:
      items:
+diff --git a/Documentation/devicetree/bindings/clock/qcom,sm7250-camcc.yaml b/Documentation/devicetree/bindings/clock/qcom,sm7250-camcc.yaml
+new file mode 100644
+index 000000000..e5697098f
+--- /dev/null
++++ b/Documentation/devicetree/bindings/clock/qcom,sm7250-camcc.yaml
+@@ -0,0 +1,78 @@
++# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
++%YAML 1.2
++---
++$id: http://devicetree.org/schemas/clock/qcom,sm7250-camcc.yaml#
++$schema: http://devicetree.org/meta-schemas/core.yaml#
++
++title: Qualcomm Camera Clock & Reset Controller on SM7250
++
++maintainers:
++  - lazybrar <211365301+lazybrar@users.noreply.github.com>
++
++description: |
++  Qualcomm camera clock control module provides the clocks and power
++  domains on SM7250.
++
++  See also: include/dt-bindings/clock/qcom,camcc-sm7250.h
++
++allOf:
++  - $ref: qcom,gcc.yaml#
++
++properties:
++  compatible:
++    const: qcom,sm7250-camcc
++
++  clocks:
++    items:
++      - description: AHB
++      - description: Board XO source
++      - description: Board active XO source
++      - description: Sleep clock source
++
++  clock-names:
++    items:
++      - const: iface
++      - const: bi_tcxo
++      - const: bi_tcxo_ao
++      - const: sleep_clk
++
++  power-domains:
++    items:
++      - description: CX power domain
++
++  reg:
++    maxItems: 1
++
++  required-opps:
++    maxItems: 1
++    description:
++      OPP node describing required CX performance point.
++
++required:
++  - compatible
++  - clocks
++  - clock-names
++  - power-domains
++  - required-opps
++
++unevaluatedProperties: false
++
++examples:
++  - |
++    #include <dt-bindings/clock/qcom,rpmh.h>
++    #include <dt-bindings/clock/qcom,sm7250-gcc.h>
++    #include <dt-bindings/power/qcom,rpmhpd.h>
++    clock-controller@ad00000 {
++      compatible = "qcom,sm7250-camcc";
++      reg = <0x0ad00000 0x10000>;
++      clocks = <&gcc GCC_CAMERA_AHB_CLK>,
++               <&rpmhcc RPMH_CXO_CLK>,
++               <&rpmhcc RPMH_CXO_CLK_A>,
++               <&sleep_clk>;
++      clock-names = "iface", "bi_tcxo", "bi_tcxo_ao", "sleep_clk";
++      power-domains = <&rpmhpd RPMHPD_CX>;
++      required-opps = <&rpmhpd_opp_low_svs>;
++      #clock-cells = <1>;
++      #power-domain-cells = <1>;
++    };
++...
 diff --git a/Documentation/devicetree/bindings/clock/qcom,sm7250-dispcc.yaml b/Documentation/devicetree/bindings/clock/qcom,sm7250-dispcc.yaml
 new file mode 100644
 index 000000000..47cbb148c
@@ -190,6 +296,70 @@ index 000000000..47cbb148c
 +      #power-domain-cells = <1>;
 +    };
 +...
+diff --git a/Documentation/devicetree/bindings/clock/qcom,sm7250-videocc.yaml b/Documentation/devicetree/bindings/clock/qcom,sm7250-videocc.yaml
+new file mode 100644
+index 000000000..54c948ec9
+--- /dev/null
++++ b/Documentation/devicetree/bindings/clock/qcom,sm7250-videocc.yaml
+@@ -0,0 +1,58 @@
++# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
++%YAML 1.2
++---
++$id: http://devicetree.org/schemas/clock/qcom,sm7250-videocc.yaml#
++$schema: http://devicetree.org/meta-schemas/core.yaml#
++
++title: Qualcomm Video Clock & Reset Controller on SM7250
++
++maintainers:
++  - Sreeshankar K <sreeshankar0910@gmail.com>
++
++description: |
++  Qualcomm video clock control module provides the clocks, resets and power
++  domains on SM7250.
++
++  See also: include/dt-bindings/clock/qcom,sm7250-videocc.h
++
++properties:
++  compatible:
++    const: qcom,sm7250-videocc
++
++  clocks:
++    items:
++      - description: Board XO source
++      - description: Board Always On XO source
++      - description: Sleep clock source
++
++  power-domains:
++    maxItems: 1
++    description:
++      CX power domain.
++
++required:
++  - compatible
++  - clocks
++  - power-domains
++
++allOf:
++  - $ref: qcom,gcc.yaml#
++
++unevaluatedProperties: false
++
++examples:
++  - |
++    #include <dt-bindings/clock/qcom,rpmh.h>
++    #include <dt-bindings/power/qcom,rpmhpd.h>
++    clock-controller@ab00000 {
++      compatible = "qcom,sm7250-videocc";
++      reg = <0x0ab00000 0x10000>;
++      clocks = <&rpmhcc RPMH_CXO_CLK>,
++               <&rpmhcc RPMH_CXO_CLK_A>,
++               <&sleep_clk>;
++      power-domains = <&rpmhpd RPMHPD_CX>;
++      #clock-cells = <1>;
++      #reset-cells = <1>;
++      #power-domain-cells = <1>;
++    };
++...
 diff --git a/Documentation/devicetree/bindings/cpufreq/cpufreq-qcom-hw.yaml b/Documentation/devicetree/bindings/cpufreq/cpufreq-qcom-hw.yaml
 index 98eb36bff..2dc2c265c 100644
 --- a/Documentation/devicetree/bindings/cpufreq/cpufreq-qcom-hw.yaml
@@ -236,7 +406,7 @@ index 9e459f12c..d71a6166f 100644
        properties:
 diff --git a/Documentation/devicetree/bindings/display/panel/samsung,ams644vk04.yaml b/Documentation/devicetree/bindings/display/panel/samsung,ams644vk04.yaml
 new file mode 100644
-index 000000000..7bd005336
+index 000000000..bb5c02bae
 --- /dev/null
 +++ b/Documentation/devicetree/bindings/display/panel/samsung,ams644vk04.yaml
 @@ -0,0 +1,73 @@
@@ -249,7 +419,7 @@ index 000000000..7bd005336
 +title: Samsung AMS644VK04 1080x2400 MIPI-DSI Panel
 +
 +maintainers:
-+  - lazybrar <lazybrar@users.noreply.github.com>
++  - lazybrar <211365301+lazybrar@users.noreply.github.com>
 +
 +description:
 +  The Samsung AMS644VK04 is a 6.44 inch 1080x2400 MIPI-DSI command mode AMOLED
@@ -325,9 +495,83 @@ index 037d4ad8f..0cbdb3b2f 100644
            - qcom,scm-sm8150
            - qcom,scm-sm8250
            - qcom,scm-sm8350
+diff --git a/Documentation/devicetree/bindings/i2c/qcom,i2c-cci.yaml b/Documentation/devicetree/bindings/i2c/qcom,i2c-cci.yaml
+index 1e8def25e..5b34e10fb 100644
+--- a/Documentation/devicetree/bindings/i2c/qcom,i2c-cci.yaml
++++ b/Documentation/devicetree/bindings/i2c/qcom,i2c-cci.yaml
+@@ -39,6 +39,7 @@ properties:
+               - qcom,shikra-cci
+               - qcom,sm6150-cci
+               - qcom,sm6350-cci
++              - qcom,sm7250-cci
+               - qcom,sm8250-cci
+               - qcom,sm8450-cci
+               - qcom,sm8550-cci
+@@ -218,6 +219,7 @@ allOf:
+           contains:
+             enum:
+               - qcom,sc7280-cci
++              - qcom,sm7250-cci
+               - qcom,sm8250-cci
+               - qcom,sm8450-cci
+     then:
+diff --git a/Documentation/devicetree/bindings/input/awinic,aw8697.yaml b/Documentation/devicetree/bindings/input/awinic,aw8697.yaml
+new file mode 100644
+index 000000000..226339705
+--- /dev/null
++++ b/Documentation/devicetree/bindings/input/awinic,aw8697.yaml
+@@ -0,0 +1,48 @@
++# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
++%YAML 1.2
++---
++$id: http://devicetree.org/schemas/input/awinic,aw8697.yaml#
++$schema: http://devicetree.org/meta-schemas/core.yaml#
++
++title: Awinic AW8697 haptic driver for LRA motors
++
++maintainers:
++  - lazybrar <211365301+lazybrar@users.noreply.github.com>
++
++properties:
++  compatible:
++    const: awinic,aw8697
++
++  reg:
++    maxItems: 1
++
++  reset-gpios:
++    description: Active-low reset (RSTN) pin
++    maxItems: 1
++
++  interrupts:
++    description: Interrupt line (INTN), currently not used by the driver
++    maxItems: 1
++
++required:
++  - compatible
++  - reg
++
++additionalProperties: false
++
++examples:
++  - |
++    #include <dt-bindings/gpio/gpio.h>
++    #include <dt-bindings/interrupt-controller/irq.h>
++
++    i2c {
++        #address-cells = <1>;
++        #size-cells = <0>;
++
++        haptics@5a {
++            compatible = "awinic,aw8697";
++            reg = <0x5a>;
++            reset-gpios = <&tlmm 71 GPIO_ACTIVE_LOW>;
++            interrupts-extended = <&tlmm 70 IRQ_TYPE_LEVEL_LOW>;
++        };
++    };
 diff --git a/Documentation/devicetree/bindings/input/touchscreen/goodix,gt9886.yaml b/Documentation/devicetree/bindings/input/touchscreen/goodix,gt9886.yaml
 new file mode 100644
-index 000000000..e6499fb12
+index 000000000..c0c7048cf
 --- /dev/null
 +++ b/Documentation/devicetree/bindings/input/touchscreen/goodix,gt9886.yaml
 @@ -0,0 +1,67 @@
@@ -340,7 +584,7 @@ index 000000000..e6499fb12
 +title: Goodix GT9886 touchscreen controller
 +
 +maintainers:
-+  - lazybrar <lazybrar@users.noreply.github.com>
++  - lazybrar <211365301+lazybrar@users.noreply.github.com>
 +
 +allOf:
 +  - $ref: touchscreen.yaml#
@@ -398,6 +642,114 @@ index 000000000..e6499fb12
 +        };
 +    };
 +...
+diff --git a/Documentation/devicetree/bindings/interconnect/qcom,sm7250-rpmh.yaml b/Documentation/devicetree/bindings/interconnect/qcom,sm7250-rpmh.yaml
+new file mode 100644
+index 000000000..01822f001
+--- /dev/null
++++ b/Documentation/devicetree/bindings/interconnect/qcom,sm7250-rpmh.yaml
+@@ -0,0 +1,102 @@
++# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
++%YAML 1.2
++---
++$id: http://devicetree.org/schemas/interconnect/qcom,sm7250-rpmh.yaml#
++$schema: http://devicetree.org/meta-schemas/core.yaml#
++
++title: Qualcomm RPMh Network-On-Chip Interconnect on SM7250
++
++maintainers:
++  - lazybrar <211365301+lazybrar@users.noreply.github.com>
++
++description: |
++  RPMh interconnect providers support system bandwidth requirements through
++  RPMh hardware accelerators known as Bus Clock Manager (BCM). The provider is
++  able to communicate with the BCM through the Resource State Coordinator (RSC)
++  associated with each execution environment. Provider nodes must point to at
++  least one RPMh device child node pertaining to their RSC and each provider
++  can map to multiple RPMh resources.
++
++  See also: include/dt-bindings/interconnect/qcom,sm7250-rpmh.h
++
++properties:
++  compatible:
++    enum:
++      - qcom,sm7250-aggre1-noc
++      - qcom,sm7250-aggre2-noc
++      - qcom,sm7250-config-noc
++      - qcom,sm7250-dc-noc
++      - qcom,sm7250-gem-noc
++      - qcom,sm7250-mmss-noc
++      - qcom,sm7250-npu-noc
++      - qcom,sm7250-system-noc
++
++  reg:
++    maxItems: 1
++
++# Child node's properties
++patternProperties:
++  '^interconnect-[a-z0-9\-]+$':
++    type: object
++    description:
++      The interconnect providers do not have a separate QoS register space,
++      but share parent's space.
++    $ref: qcom,rpmh-common.yaml#
++
++    properties:
++      compatible:
++        enum:
++          - qcom,sm7250-compute-noc
++          - qcom,sm7250-ipa-virt
++          - qcom,sm7250-mc-virt
++          - qcom,sm7250-qup-virt
++
++    required:
++      - compatible
++
++    unevaluatedProperties: false
++
++required:
++  - compatible
++  - reg
++
++allOf:
++  - $ref: qcom,rpmh-common.yaml#
++
++unevaluatedProperties: false
++
++examples:
++  - |
++    #include <dt-bindings/interconnect/qcom,sm7250-rpmh.h>
++
++    interconnect@1620000 {
++        compatible = "qcom,sm7250-system-noc";
++        reg = <0x01620000 0x19200>;
++        #interconnect-cells = <2>;
++        qcom,bcm-voters = <&apps_bcm_voter>;
++
++        interconnect-ipa-virt {
++            compatible = "qcom,sm7250-ipa-virt";
++            #interconnect-cells = <2>;
++            qcom,bcm-voters = <&apps_bcm_voter>;
++        };
++
++        interconnect-qup-virt {
++            compatible = "qcom,sm7250-qup-virt";
++            #interconnect-cells = <2>;
++            qcom,bcm-voters = <&apps_bcm_voter>;
++        };
++    };
++
++    interconnect@9680000 {
++        compatible = "qcom,sm7250-gem-noc";
++        reg = <0x09680000 0x3e200>;
++        #interconnect-cells = <2>;
++        qcom,bcm-voters = <&apps_bcm_voter>;
++
++        interconnect-mc-virt {
++            compatible = "qcom,sm7250-mc-virt";
++            #interconnect-cells = <2>;
++            qcom,bcm-voters = <&apps_bcm_voter>;
++        };
++    };
 diff --git a/Documentation/devicetree/bindings/interrupt-controller/qcom,pdc.yaml b/Documentation/devicetree/bindings/interrupt-controller/qcom,pdc.yaml
 index 8162a49d4..c30b88589 100644
 --- a/Documentation/devicetree/bindings/interrupt-controller/qcom,pdc.yaml
@@ -434,6 +786,466 @@ index a378fe8c7..efcb04801 100644
            - qcom,sm8250-ipcc
            - qcom,sm8350-ipcc
            - qcom,sm8450-ipcc
+diff --git a/Documentation/devicetree/bindings/media/qcom,sm7250-camss.yaml b/Documentation/devicetree/bindings/media/qcom,sm7250-camss.yaml
+new file mode 100644
+index 000000000..66764943e
+--- /dev/null
++++ b/Documentation/devicetree/bindings/media/qcom,sm7250-camss.yaml
+@@ -0,0 +1,291 @@
++# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
++%YAML 1.2
++---
++$id: http://devicetree.org/schemas/media/qcom,sm7250-camss.yaml#
++$schema: http://devicetree.org/meta-schemas/core.yaml#
++
++title: Qualcomm SM7250 Camera Subsystem (CAMSS)
++
++maintainers:
++  - lazybrar <211365301+lazybrar@users.noreply.github.com>
++
++description:
++  This binding describes the camera subsystem hardware found on SM7250
++  Qualcomm SoCs. It includes the CSIPHY (CSI Physical layer), CSID (CSI
++  Decoder) and VFE (Video Front End, IFE) blocks, which comply with the MIPI
++  CSI2 protocol. Only the blocks driven by the camss driver are described;
++  the image processing engines (BPS, IPE, JPEG, ...) are not.
++
++properties:
++  compatible:
++    const: qcom,sm7250-camss
++
++  reg:
++    items:
++      - description: Registers for CSID 0
++      - description: Registers for CSID 1
++      - description: Registers for CSID Lite
++      - description: Registers for CSIPHY 0
++      - description: Registers for CSIPHY 1
++      - description: Registers for CSIPHY 2
++      - description: Registers for CSIPHY 3
++      - description: Registers for VFE (Video Front End) 0
++      - description: Registers for VFE 1
++      - description: Registers for VFE Lite
++
++  reg-names:
++    items:
++      - const: csid0
++      - const: csid1
++      - const: csid_lite
++      - const: csiphy0
++      - const: csiphy1
++      - const: csiphy2
++      - const: csiphy3
++      - const: vfe0
++      - const: vfe1
++      - const: vfe_lite
++
++  clocks:
++    maxItems: 22
++
++  clock-names:
++    items:
++      - const: gcc_axi_hf
++      - const: camnoc_axi
++      - const: cpas_ahb
++      - const: csiphy0
++      - const: csiphy0_timer
++      - const: csiphy1
++      - const: csiphy1_timer
++      - const: csiphy2
++      - const: csiphy2_timer
++      - const: csiphy3
++      - const: csiphy3_timer
++      - const: vfe0
++      - const: vfe0_axi
++      - const: vfe0_cphy_rx
++      - const: vfe0_csid
++      - const: vfe1
++      - const: vfe1_axi
++      - const: vfe1_cphy_rx
++      - const: vfe1_csid
++      - const: vfe_lite
++      - const: vfe_lite_cphy_rx
++      - const: vfe_lite_csid
++
++  interrupts:
++    maxItems: 10
++
++  interrupt-names:
++    items:
++      - const: csid0
++      - const: csid1
++      - const: csid_lite
++      - const: csiphy0
++      - const: csiphy1
++      - const: csiphy2
++      - const: csiphy3
++      - const: vfe0
++      - const: vfe1
++      - const: vfe_lite
++
++  interconnects:
++    maxItems: 2
++
++  interconnect-names:
++    items:
++      - const: ahb
++      - const: hf_0
++
++  iommus:
++    maxItems: 1
++    description: Camera IFE non-protected stream
++
++  power-domains:
++    items:
++      - description: IFE0 GDSC - Image Front End, Global Distributed Switch Controller.
++      - description: IFE1 GDSC - Image Front End, Global Distributed Switch Controller.
++      - description: Titan GDSC - Titan ISP Block, Global Distributed Switch Controller.
++
++  power-domain-names:
++    items:
++      - const: ife0
++      - const: ife1
++      - const: top
++
++  vdd-csiphy-0p9-supply:
++    description:
++      Phandle to a 0.88V regulator supply to the CSI PHYs.
++
++  ports:
++    $ref: /schemas/graph.yaml#/properties/ports
++
++    description:
++      CSI input ports.
++
++    patternProperties:
++      "^port@[0-3]$":
++        $ref: /schemas/graph.yaml#/$defs/port-base
++        unevaluatedProperties: false
++
++        description:
++          Input port for receiving CSI data from a CSIPHY.
++
++        properties:
++          endpoint:
++            $ref: video-interfaces.yaml#
++            unevaluatedProperties: false
++
++            properties:
++              data-lanes:
++                minItems: 1
++                maxItems: 4
++
++              bus-type:
++                enum:
++                  - 4  # MEDIA_BUS_TYPE_CSI2_DPHY
++
++            required:
++              - data-lanes
++
++required:
++  - compatible
++  - reg
++  - reg-names
++  - clocks
++  - clock-names
++  - interrupts
++  - interrupt-names
++  - iommus
++  - power-domains
++  - power-domain-names
++
++additionalProperties: false
++
++examples:
++  - |
++    #include <dt-bindings/clock/qcom,camcc-sm7250.h>
++    #include <dt-bindings/clock/qcom,sm7250-gcc.h>
++    #include <dt-bindings/interrupt-controller/arm-gic.h>
++
++    soc {
++        #address-cells = <2>;
++        #size-cells = <2>;
++
++        isp@acb3000 {
++            compatible = "qcom,sm7250-camss";
++
++            reg = <0x0 0x0acb3000 0x0 0x1000>,
++                  <0x0 0x0acba000 0x0 0x1000>,
++                  <0x0 0x0acc8000 0x0 0x1000>,
++                  <0x0 0x0ace0000 0x0 0x2000>,
++                  <0x0 0x0ace2000 0x0 0x2000>,
++                  <0x0 0x0ace4000 0x0 0x2000>,
++                  <0x0 0x0ace6000 0x0 0x2000>,
++                  <0x0 0x0acaf000 0x0 0x5200>,
++                  <0x0 0x0acb6000 0x0 0x5200>,
++                  <0x0 0x0acc4000 0x0 0x4000>;
++            reg-names = "csid0",
++                        "csid1",
++                        "csid_lite",
++                        "csiphy0",
++                        "csiphy1",
++                        "csiphy2",
++                        "csiphy3",
++                        "vfe0",
++                        "vfe1",
++                        "vfe_lite";
++
++            clocks = <&gcc GCC_CAMERA_HF_AXI_CLK>,
++                     <&camcc CAM_CC_CAMNOC_AXI_CLK>,
++                     <&camcc CAM_CC_CPAS_AHB_CLK>,
++                     <&camcc CAM_CC_CSIPHY0_CLK>,
++                     <&camcc CAM_CC_CSI0PHYTIMER_CLK>,
++                     <&camcc CAM_CC_CSIPHY1_CLK>,
++                     <&camcc CAM_CC_CSI1PHYTIMER_CLK>,
++                     <&camcc CAM_CC_CSIPHY2_CLK>,
++                     <&camcc CAM_CC_CSI2PHYTIMER_CLK>,
++                     <&camcc CAM_CC_CSIPHY3_CLK>,
++                     <&camcc CAM_CC_CSI3PHYTIMER_CLK>,
++                     <&camcc CAM_CC_IFE_0_CLK>,
++                     <&camcc CAM_CC_IFE_0_AXI_CLK>,
++                     <&camcc CAM_CC_IFE_0_CPHY_RX_CLK>,
++                     <&camcc CAM_CC_IFE_0_CSID_CLK>,
++                     <&camcc CAM_CC_IFE_1_CLK>,
++                     <&camcc CAM_CC_IFE_1_AXI_CLK>,
++                     <&camcc CAM_CC_IFE_1_CPHY_RX_CLK>,
++                     <&camcc CAM_CC_IFE_1_CSID_CLK>,
++                     <&camcc CAM_CC_IFE_LITE_CLK>,
++                     <&camcc CAM_CC_IFE_LITE_CPHY_RX_CLK>,
++                     <&camcc CAM_CC_IFE_LITE_CSID_CLK>;
++            clock-names = "gcc_axi_hf",
++                          "camnoc_axi",
++                          "cpas_ahb",
++                          "csiphy0",
++                          "csiphy0_timer",
++                          "csiphy1",
++                          "csiphy1_timer",
++                          "csiphy2",
++                          "csiphy2_timer",
++                          "csiphy3",
++                          "csiphy3_timer",
++                          "vfe0",
++                          "vfe0_axi",
++                          "vfe0_cphy_rx",
++                          "vfe0_csid",
++                          "vfe1",
++                          "vfe1_axi",
++                          "vfe1_cphy_rx",
++                          "vfe1_csid",
++                          "vfe_lite",
++                          "vfe_lite_cphy_rx",
++                          "vfe_lite_csid";
++
++            interrupts = <GIC_SPI 464 IRQ_TYPE_EDGE_RISING>,
++                         <GIC_SPI 466 IRQ_TYPE_EDGE_RISING>,
++                         <GIC_SPI 468 IRQ_TYPE_EDGE_RISING>,
++                         <GIC_SPI 477 IRQ_TYPE_EDGE_RISING>,
++                         <GIC_SPI 478 IRQ_TYPE_EDGE_RISING>,
++                         <GIC_SPI 479 IRQ_TYPE_EDGE_RISING>,
++                         <GIC_SPI 448 IRQ_TYPE_EDGE_RISING>,
++                         <GIC_SPI 465 IRQ_TYPE_EDGE_RISING>,
++                         <GIC_SPI 467 IRQ_TYPE_EDGE_RISING>,
++                         <GIC_SPI 469 IRQ_TYPE_EDGE_RISING>;
++            interrupt-names = "csid0",
++                              "csid1",
++                              "csid_lite",
++                              "csiphy0",
++                              "csiphy1",
++                              "csiphy2",
++                              "csiphy3",
++                              "vfe0",
++                              "vfe1",
++                              "vfe_lite";
++
++            iommus = <&apps_smmu 0x800 0x5e0>;
++
++            power-domains = <&camcc IFE_0_GDSC>,
++                            <&camcc IFE_1_GDSC>,
++                            <&camcc TITAN_TOP_GDSC>;
++            power-domain-names = "ife0",
++                                 "ife1",
++                                 "top";
++
++            vdd-csiphy-0p9-supply = <&vreg_l5a_0p88>;
++
++            ports {
++                #address-cells = <1>;
++                #size-cells = <0>;
++
++                port@3 {
++                    reg = <3>;
++
++                    csiphy3_ep: endpoint {
++                        data-lanes = <0 1 2 3>;
++                        remote-endpoint = <&sensor_ep>;
++                    };
++                };
++            };
++        };
++    };
+diff --git a/Documentation/devicetree/bindings/media/qcom,sm7250-venus.yaml b/Documentation/devicetree/bindings/media/qcom,sm7250-venus.yaml
+new file mode 100644
+index 000000000..faf0f81ab
+--- /dev/null
++++ b/Documentation/devicetree/bindings/media/qcom,sm7250-venus.yaml
+@@ -0,0 +1,145 @@
++# SPDX-License-Identifier: (GPL-2.0 OR BSD-2-Clause)
++%YAML 1.2
++---
++$id: http://devicetree.org/schemas/media/qcom,sm7250-venus.yaml#
++$schema: http://devicetree.org/meta-schemas/core.yaml#
++
++title: Qualcomm SM7250 Venus video encode and decode accelerators
++
++maintainers:
++  - Sreeshankar K <sreeshankar0910@gmail.com>
++
++description: |
++  The Venus IP is a video encode and decode accelerator present
++  on Qualcomm platforms
++
++allOf:
++  - $ref: qcom,venus-common.yaml#
++
++properties:
++  compatible:
++    const: qcom,sm7250-venus
++
++  power-domains:
++    minItems: 2
++    maxItems: 3
++
++  power-domain-names:
++    minItems: 2
++    items:
++      - const: venus
++      - const: vcodec0
++      - const: cx
++
++  clocks:
++    maxItems: 5
++
++  clock-names:
++    items:
++      - const: core
++      - const: iface
++      - const: bus
++      - const: vcodec0_core
++      - const: vcodec0_bus
++
++  iommus:
++    maxItems: 2
++
++  memory-region:
++    maxItems: 1
++
++  interconnects:
++    maxItems: 2
++
++  interconnect-names:
++    items:
++      - const: video-mem
++      - const: cpu-cfg
++
++  operating-points-v2: true
++  opp-table:
++    type: object
++
++  video-decoder:
++    type: object
++
++    properties:
++      compatible:
++        const: venus-decoder
++
++    required:
++      - compatible
++
++    deprecated: true
++    additionalProperties: false
++
++  video-encoder:
++    type: object
++
++    properties:
++      compatible:
++        const: venus-encoder
++
++    required:
++      - compatible
++
++    deprecated: true
++    additionalProperties: false
++
++  video-firmware:
++    type: object
++    additionalProperties: false
++
++    description: |
++      Firmware subnode is needed when the platform does not
++      have TrustZone.
++
++    properties:
++      iommus:
++        maxItems: 1
++
++    required:
++      - iommus
++
++required:
++  - compatible
++  - power-domain-names
++  - iommus
++
++unevaluatedProperties: false
++
++examples:
++  - |
++    #include <dt-bindings/interrupt-controller/arm-gic.h>
++    #include <dt-bindings/clock/qcom,sm7250-videocc.h>
++    #include <dt-bindings/power/qcom,rpmhpd.h>
++
++    video-codec@aa00000 {
++        compatible = "qcom,sm7250-venus";
++        reg = <0x0aa00000 0xff000>;
++        interrupts = <GIC_SPI 174 IRQ_TYPE_LEVEL_HIGH>;
++        power-domains = <&videocc MVSC_GDSC>,
++                        <&videocc MVS0_GDSC>,
++                        <&rpmhpd RPMHPD_CX>;
++        power-domain-names = "venus", "vcodec0", "cx";
++        operating-points-v2 = <&venus_opp_table>;
++        clocks = <&videocc VIDEOCC_MVSC_CORE_CLK>,
++                 <&videocc VIDEOCC_VENUS_AHB_CLK>,
++                 <&videocc VIDEOCC_MVSC_CTL_AXI_CLK>,
++                 <&videocc VIDEOCC_MVS0_CORE_CLK>,
++                 <&videocc VIDEOCC_MVS0_AXI_CLK>;
++        clock-names = "core", "iface", "bus",
++                      "vcodec0_core", "vcodec0_bus";
++        iommus = <&apps_smmu 0x1380 0x60>,
++                 <&apps_smmu 0x1360 0x0>;
++        memory-region = <&video_mem>;
++
++        venus_opp_table: opp-table {
++            compatible = "operating-points-v2";
++
++            opp-240000000 {
++                opp-hz = /bits/ 64 <240000000>;
++                required-opps = <&rpmhpd_opp_low_svs>;
++            };
++        };
++    };
+diff --git a/Documentation/devicetree/bindings/nvmem/qcom,qfprom.yaml b/Documentation/devicetree/bindings/nvmem/qcom,qfprom.yaml
+index bc0a0898b..3877b46ff 100644
+--- a/Documentation/devicetree/bindings/nvmem/qcom,qfprom.yaml
++++ b/Documentation/devicetree/bindings/nvmem/qcom,qfprom.yaml
+@@ -57,6 +57,7 @@ properties:
+           - qcom,sm6115-qfprom
+           - qcom,sm6350-qfprom
+           - qcom,sm6375-qfprom
++          - qcom,sm7250-qfprom
+           - qcom,sm8150-qfprom
+           - qcom,sm8250-qfprom
+           - qcom,sm8450-qfprom
 diff --git a/Documentation/devicetree/bindings/phy/qcom,sc8280xp-qmp-ufs-phy.yaml b/Documentation/devicetree/bindings/phy/qcom,sc8280xp-qmp-ufs-phy.yaml
 index 4efe40c0d..4e1bc03dd 100644
 --- a/Documentation/devicetree/bindings/phy/qcom,sc8280xp-qmp-ufs-phy.yaml
@@ -681,27 +1493,29 @@ index 000000000..9912c0149
 +        };
 +    };
 diff --git a/Documentation/devicetree/bindings/remoteproc/qcom,sm6350-pas.yaml b/Documentation/devicetree/bindings/remoteproc/qcom,sm6350-pas.yaml
-index 42e02c643..6e8714e69 100644
+index 42e02c643..f42bb7da6 100644
 --- a/Documentation/devicetree/bindings/remoteproc/qcom,sm6350-pas.yaml
 +++ b/Documentation/devicetree/bindings/remoteproc/qcom,sm6350-pas.yaml
-@@ -19,6 +19,8 @@ properties:
+@@ -19,6 +19,9 @@ properties:
        - qcom,sm6350-adsp-pas
        - qcom,sm6350-cdsp-pas
        - qcom,sm6350-mpss-pas
 +      - qcom,sm7250-adsp-pas
++      - qcom,sm7250-cdsp-pas
 +      - qcom,sm7250-mpss-pas
  
    reg:
      maxItems: 1
-@@ -86,6 +88,7 @@ allOf:
+@@ -86,6 +89,8 @@ allOf:
            enum:
              - qcom,sm6350-adsp-pas
              - qcom,sm6350-cdsp-pas
 +            - qcom,sm7250-adsp-pas
++            - qcom,sm7250-cdsp-pas
      then:
        properties:
          interrupts:
-@@ -104,6 +107,7 @@ allOf:
+@@ -104,6 +109,7 @@ allOf:
          compatible:
            enum:
              - qcom,sm6350-adsp-pas
@@ -709,7 +1523,26 @@ index 42e02c643..6e8714e69 100644
      then:
        properties:
          power-domains:
-@@ -136,6 +140,7 @@ allOf:
+@@ -131,11 +137,26 @@ allOf:
+             - const: cx
+             - const: mx
+ 
++  - if:
++      properties:
++        compatible:
++          enum:
++            - qcom,sm7250-cdsp-pas
++    then:
++      properties:
++        power-domains:
++          items:
++            - description: CX power domain
++        power-domain-names:
++          items:
++            - const: cx
++
+   - if:
+       properties:
          compatible:
            enum:
              - qcom,sm6350-mpss-pas
@@ -719,7 +1552,7 @@ index 42e02c643..6e8714e69 100644
          power-domains:
 diff --git a/Documentation/devicetree/bindings/sound/nxp,tfa9874.yaml b/Documentation/devicetree/bindings/sound/nxp,tfa9874.yaml
 new file mode 100644
-index 000000000..61121ada2
+index 000000000..d60670039
 --- /dev/null
 +++ b/Documentation/devicetree/bindings/sound/nxp,tfa9874.yaml
 @@ -0,0 +1,62 @@
@@ -732,7 +1565,7 @@ index 000000000..61121ada2
 +title: NXP/Goodix TFA9874 (TFA2) Audio Amplifier
 +
 +maintainers:
-+  - lazybrar <lazybrar@users.noreply.github.com>
++  - lazybrar <211365301+lazybrar@users.noreply.github.com>
 +
 +description:
 +  Mono class-D speaker amplifier with an I2C control interface and an I2S/TDM
@@ -829,6 +1662,123 @@ index 2cf433f61..b63e4a0b8 100644
  #define QCOM_ID_IPQ6018			402
  #define QCOM_ID_IPQ6028			403
  #define QCOM_ID_SDM429W			416
+diff --git a/include/dt-bindings/clock/qcom,camcc-sm7250.h b/include/dt-bindings/clock/qcom,camcc-sm7250.h
+new file mode 100644
+index 000000000..5896dce57
+--- /dev/null
++++ b/include/dt-bindings/clock/qcom,camcc-sm7250.h
+@@ -0,0 +1,111 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * Copyright (c) 2018-2019, The Linux Foundation. All rights reserved.
++ */
++
++#ifndef _DT_BINDINGS_CLK_QCOM_CAM_CC_SM7250_H
++#define _DT_BINDINGS_CLK_QCOM_CAM_CC_SM7250_H
++
++#define CAM_CC_PLL0						0
++#define CAM_CC_PLL0_OUT_EVEN					1
++#define CAM_CC_PLL0_OUT_ODD					2
++#define CAM_CC_PLL1						3
++#define CAM_CC_PLL1_OUT_EVEN					4
++#define CAM_CC_PLL2						5
++#define CAM_CC_PLL2_OUT_AUX					6
++#define CAM_CC_PLL2_OUT_MAIN					7
++#define CAM_CC_PLL3						8
++#define CAM_CC_PLL3_OUT_EVEN					9
++#define CAM_CC_PLL4						10
++#define CAM_CC_PLL4_OUT_EVEN					11
++#define CAM_CC_CORE_AHB_CLK					12
++#define CAM_CC_CPAS_AHB_CLK					13
++#define CAM_CC_CPHY_RX_CLK_SRC					14
++#define CAM_CC_CSI0PHYTIMER_CLK					15
++#define CAM_CC_CSI0PHYTIMER_CLK_SRC				16
++#define CAM_CC_CSI1PHYTIMER_CLK					17
++#define CAM_CC_CSI1PHYTIMER_CLK_SRC				18
++#define CAM_CC_CSI2PHYTIMER_CLK					19
++#define CAM_CC_CSI2PHYTIMER_CLK_SRC				20
++#define CAM_CC_CSI3PHYTIMER_CLK					21
++#define CAM_CC_CSI3PHYTIMER_CLK_SRC				22
++#define CAM_CC_CSIPHY0_CLK					23
++#define CAM_CC_CSIPHY1_CLK					24
++#define CAM_CC_CSIPHY2_CLK					25
++#define CAM_CC_CSIPHY3_CLK					26
++#define CAM_CC_FAST_AHB_CLK_SRC					27
++#define CAM_CC_FD_CORE_CLK					28
++#define CAM_CC_FD_CORE_CLK_SRC					29
++#define CAM_CC_FD_CORE_UAR_CLK					30
++#define CAM_CC_GDSC_CLK						31
++#define CAM_CC_ICP_AHB_CLK					32
++#define CAM_CC_ICP_CLK						33
++#define CAM_CC_ICP_CLK_SRC					34
++#define CAM_CC_IFE_0_AXI_CLK					35
++#define CAM_CC_IFE_0_CLK					36
++#define CAM_CC_IFE_0_CLK_SRC					37
++#define CAM_CC_IFE_0_CPHY_RX_CLK				38
++#define CAM_CC_IFE_0_CSID_CLK					39
++#define CAM_CC_IFE_0_CSID_CLK_SRC				40
++#define CAM_CC_IFE_0_DSP_CLK					41
++#define CAM_CC_IFE_1_AXI_CLK					42
++#define CAM_CC_IFE_1_CLK					43
++#define CAM_CC_IFE_1_CLK_SRC					44
++#define CAM_CC_IFE_1_CPHY_RX_CLK				45
++#define CAM_CC_IFE_1_CSID_CLK					46
++#define CAM_CC_IFE_1_CSID_CLK_SRC				47
++#define CAM_CC_IFE_1_DSP_CLK					48
++#define CAM_CC_IFE_LITE_CLK					49
++#define CAM_CC_IFE_LITE_CLK_SRC					50
++#define CAM_CC_IFE_LITE_CPHY_RX_CLK				51
++#define CAM_CC_IFE_LITE_CSID_CLK				52
++#define CAM_CC_IFE_LITE_CSID_CLK_SRC				53
++#define CAM_CC_IPE_0_AHB_CLK					54
++#define CAM_CC_IPE_0_AREG_CLK					55
++#define CAM_CC_IPE_0_AXI_CLK					56
++#define CAM_CC_IPE_0_CLK					57
++#define CAM_CC_IPE_0_CLK_SRC					58
++#define CAM_CC_IPE_1_AHB_CLK					59
++#define CAM_CC_IPE_1_AREG_CLK					60
++#define CAM_CC_IPE_1_AXI_CLK					61
++#define CAM_CC_IPE_1_CLK					62
++#define CAM_CC_JPEG_CLK						63
++#define CAM_CC_JPEG_CLK_SRC					64
++#define CAM_CC_LRME_CLK						65
++#define CAM_CC_LRME_CLK_SRC					66
++#define CAM_CC_MCLK0_CLK					67
++#define CAM_CC_MCLK0_CLK_SRC					68
++#define CAM_CC_MCLK1_CLK					69
++#define CAM_CC_MCLK1_CLK_SRC					70
++#define CAM_CC_MCLK2_CLK					71
++#define CAM_CC_MCLK2_CLK_SRC					72
++#define CAM_CC_MCLK3_CLK					73
++#define CAM_CC_MCLK3_CLK_SRC					74
++#define CAM_CC_MCLK4_CLK					75
++#define CAM_CC_MCLK4_CLK_SRC					76
++#define CAM_CC_BPS_AHB_CLK					77
++#define CAM_CC_BPS_AREG_CLK					78
++#define CAM_CC_BPS_AXI_CLK					79
++#define CAM_CC_BPS_CLK						80
++#define CAM_CC_BPS_CLK_SRC					81
++#define CAM_CC_CAMNOC_AXI_CLK					82
++#define CAM_CC_CAMNOC_AXI_CLK_SRC				83
++#define CAM_CC_CAMNOC_DCD_XO_CLK				84
++#define CAM_CC_CCI_0_CLK					85
++#define CAM_CC_CCI_0_CLK_SRC					86
++#define CAM_CC_CCI_1_CLK					87
++#define CAM_CC_CCI_1_CLK_SRC					88
++#define CAM_CC_SLEEP_CLK					89
++#define CAM_CC_SLEEP_CLK_SRC					90
++#define CAM_CC_SLOW_AHB_CLK_SRC					91
++#define CAM_CC_XO_CLK_SRC					92
++
++/* CAM_CC GDSCRs */
++#define BPS_GDSC						0
++#define IPE_0_GDSC						1
++#define IPE_1_GDSC						2
++#define IFE_0_GDSC						3
++#define IFE_1_GDSC						4
++#define TITAN_TOP_GDSC						5
++
++#endif
 diff --git a/include/dt-bindings/clock/qcom,gpucc-sm7250.h b/include/dt-bindings/clock/qcom,gpucc-sm7250.h
 new file mode 100644
 index 000000000..f4536808d
@@ -1106,5 +2056,204 @@ index 000000000..765fdc38f
 +#define HLOS1_VOTE_MMNOC_MMU_TBU_HF0_GDSC			2
 +#define HLOS1_VOTE_MMNOC_MMU_TBU_HF1_GDSC			3
 +#define HLOS1_VOTE_MMNOC_MMU_TBU_SF0_GDSC			4
++
++#endif
+diff --git a/include/dt-bindings/clock/qcom,sm7250-videocc.h b/include/dt-bindings/clock/qcom,sm7250-videocc.h
+new file mode 100644
+index 000000000..60dc054ac
+--- /dev/null
++++ b/include/dt-bindings/clock/qcom,sm7250-videocc.h
+@@ -0,0 +1,36 @@
++/* SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause) */
++/*
++ * Copyright (c) 2019, The Linux Foundation. All rights reserved.
++ */
++
++#ifndef _DT_BINDINGS_CLK_QCOM_VIDEOCC_SM7250_H
++#define _DT_BINDINGS_CLK_QCOM_VIDEOCC_SM7250_H
++
++/* VIDEOCC clocks */
++#define VIDEOCC_PLL0				0
++#define VIDEOCC_APB_CLK				1
++#define VIDEOCC_IRIS_CLK_SRC			2
++#define VIDEOCC_MVS0_AXI_CLK			3
++#define VIDEOCC_MVS0_CORE_CLK			4
++#define VIDEOCC_MVS1_AXI_CLK			5
++#define VIDEOCC_MVS1_CORE_CLK			6
++#define VIDEOCC_MVSC_CORE_CLK			7
++#define VIDEOCC_MVSC_CTL_AXI_CLK		8
++#define VIDEOCC_SLEEP_CLK			9
++#define VIDEOCC_SLEEP_CLK_SRC			10
++#define VIDEOCC_VENUS_AHB_CLK			11
++#define VIDEOCC_XO_CLK_SRC			12
++#define VIDEOCC_XO_CLK				13
++
++/* VIDEOCC resets */
++#define VIDEOCC_INTERFACE_BCR			0
++#define VIDEOCC_MVS0_BCR			1
++#define VIDEOCC_MVS1_BCR			2
++#define VIDEOCC_MVSC_BCR			3
++
++/* VIDEOCC GDSCs */
++#define MVSC_GDSC				0
++#define MVS0_GDSC				1
++#define MVS1_GDSC				2
++
++#endif
+diff --git a/include/dt-bindings/interconnect/qcom,sm7250-rpmh.h b/include/dt-bindings/interconnect/qcom,sm7250-rpmh.h
+new file mode 100644
+index 000000000..a3b964438
+--- /dev/null
++++ b/include/dt-bindings/interconnect/qcom,sm7250-rpmh.h
+@@ -0,0 +1,151 @@
++/* SPDX-License-Identifier: GPL-2.0 OR BSD-2-Clause */
++/*
++ * Qualcomm SM7250 interconnect IDs
++ *
++ * Copyright (c) 2020, The Linux Foundation. All rights reserved.
++ */
++
++#ifndef __DT_BINDINGS_INTERCONNECT_QCOM_SM7250_H
++#define __DT_BINDINGS_INTERCONNECT_QCOM_SM7250_H
++
++#define MASTER_A1NOC_CFG		0
++#define MASTER_QUP_1			1
++#define MASTER_SDCC_2			2
++#define MASTER_SDCC_4			3
++#define MASTER_EMMC			4
++#define MASTER_UFS_MEM			5
++#define MASTER_USB3			6
++#define A1NOC_SNOC_SLV			7
++#define SLAVE_SERVICE_A1NOC		8
++
++#define MASTER_A2NOC_CFG		0
++#define MASTER_QDSS_BAM			1
++#define MASTER_QUP_0			2
++#define MASTER_CRYPTO_CORE_0		3
++#define MASTER_IPA			4
++#define MASTER_QDSS_ETR			5
++#define A2NOC_SNOC_SLV			6
++#define SLAVE_SERVICE_A2NOC		7
++
++#define MASTER_NPU			0
++#define MASTER_NPU_CDP			1
++#define SLAVE_CDSP_GEM_NOC		2
++
++#define SNOC_CNOC_MAS			0
++#define MASTER_QDSS_DAP			1
++#define SLAVE_A1NOC_CFG			2
++#define SLAVE_A2NOC_CFG			3
++#define SLAVE_AHB2PHY_SOUTH		4
++#define SLAVE_AHB2PHY_CENTER		5
++#define SLAVE_AOSS			6
++#define SLAVE_CAMERA_CFG		7
++#define SLAVE_CLK_CTL			8
++#define SLAVE_CDSP_CFG			9
++#define SLAVE_RBCPR_CX_CFG		10
++#define SLAVE_RBCPR_MX_CFG		11
++#define SLAVE_CRYPTO_0_CFG		12
++#define SLAVE_CX_RDPM			13
++#define SLAVE_DCC_CFG			14
++#define SLAVE_CNOC_DDRSS		15
++#define SLAVE_DISPLAY_CFG		16
++#define SLAVE_GRAPHICS_3D_CFG		17
++#define SLAVE_IMEM_CFG			18
++#define SLAVE_IPA_CFG			19
++#define SLAVE_IPC_ROUTER_CFG		20
++#define SLAVE_LPASS			21
++#define SLAVE_CNOC_MNOC_CFG		22
++#define SLAVE_NPU_CFG			23
++#define SLAVE_PDM			24
++#define SLAVE_PIMEM_CFG			25
++#define SLAVE_PRNG			26
++#define SLAVE_QDSS_CFG			27
++#define SLAVE_QUP_0			28
++#define SLAVE_QUP_1			29
++#define SLAVE_SDCC_2			30
++#define SLAVE_SDCC_4			31
++#define SLAVE_SNOC_CFG			32
++#define SLAVE_TCSR			33
++#define SLAVE_TLMM_NORTH		34
++#define SLAVE_TLMM_SOUTH		35
++#define SLAVE_TLMM_WEST			36
++#define SLAVE_UFS_MEM_CFG		37
++#define SLAVE_EMMC_CFG			38
++#define SLAVE_USB3			39
++#define SLAVE_VENUS_CFG			40
++#define SLAVE_VSENSE_CTRL_CFG		41
++#define SLAVE_SERVICE_CNOC		42
++
++#define MASTER_CNOC_DC_NOC		0
++#define SLAVE_GEM_NOC_CFG		1
++#define SLAVE_LLCC_CFG			2
++
++#define MASTER_AMPSS_M0			0
++#define MASTER_SYS_TCU			1
++#define MASTER_GPU_TCU			2
++#define MASTER_GEM_NOC_CFG		3
++#define MASTER_COMPUTE_NOC		4
++#define MASTER_GRAPHICS_3D		5
++#define MASTER_MNOC_HF_MEM_NOC		6
++#define MASTER_MNOC_SF_MEM_NOC		7
++#define MASTER_SNOC_GC_MEM_NOC		8
++#define MASTER_SNOC_SF_MEM_NOC		9
++#define SLAVE_MCDMA_MS_MPU_CFG		10
++#define SLAVE_MSS_PROC_MS_MPU_CFG	11
++#define SLAVE_GEM_NOC_SNOC		12
++#define SLAVE_LLCC			13
++#define SLAVE_SERVICE_GEM_NOC		14
++
++#define MASTER_IPA_CORE			0
++#define SLAVE_IPA_CORE			1
++
++#define MASTER_LLCC			0
++#define SLAVE_EBI_CH0			1
++
++#define MASTER_CNOC_MNOC_CFG		0
++#define MASTER_CAMNOC_ICP		1
++#define MASTER_CAMNOC_HF0		2
++#define MASTER_CAMNOC_HF1		3
++#define MASTER_CAMNOC_SF		4
++#define MASTER_MDP_PORT0		5
++#define MASTER_MDP_PORT1		6
++#define MASTER_ROTATOR			7
++#define MASTER_VIDEO_P0			8
++#define MASTER_VIDEO_P1			9
++#define MASTER_VIDEO_PROC		10
++#define SLAVE_MNOC_HF_MEM_NOC		11
++#define SLAVE_MNOC_SF_MEM_NOC		12
++#define SLAVE_SERVICE_MNOC		13
++
++#define MASTER_NPU_SYS			0
++#define MASTER_NPU_NOC_CFG		1
++#define SLAVE_NPU_CAL_DP0		2
++#define SLAVE_NPU_CP			3
++#define SLAVE_NPU_INT_DMA_BWMON_CFG	4
++#define SLAVE_NPU_DPM			5
++#define SLAVE_ISENSE_CFG		6
++#define SLAVE_NPU_LLM_CFG		7
++#define SLAVE_NPU_TCM			8
++#define SLAVE_NPU_COMPUTE_NOC		9
++#define SLAVE_SERVICE_NPU_NOC		10
++
++#define MASTER_QUP_CORE_0		0
++#define MASTER_QUP_CORE_1		1
++#define SLAVE_QUP_CORE_0		2
++#define SLAVE_QUP_CORE_1		3
++
++#define MASTER_SNOC_CFG			0
++#define A1NOC_SNOC_MAS			1
++#define A2NOC_SNOC_MAS			2
++#define MASTER_GEM_NOC_SNOC		3
++#define MASTER_PIMEM			4
++#define SLAVE_APPSS			5
++#define SNOC_CNOC_SLV			6
++#define SLAVE_SNOC_GEM_NOC_GC		7
++#define SLAVE_SNOC_GEM_NOC_SF		8
++#define SLAVE_OCIMEM			9
++#define SLAVE_PIMEM			10
++#define SLAVE_SERVICE_SNOC		11
++#define SLAVE_QDSS_STM			12
++#define SLAVE_TCU			13
 +
 +#endif

@@ -1,0 +1,50 @@
+Subject: remoteproc: qcom: pas: SM7250 ADSP
+
+Combined diff of the following commits (base v7.3-rc7):
+
+  - remoteproc/soc/mailbox: add SM7250 MPSS PAS, pd-mapper and IPCC compatibles
+  - remoteproc: qcom: pas: Add SM7250 ADSP support
+  - remoteproc: qcom: pas: Add SM7250 CDSP support
+  - remoteproc: qcom_q6v5_pas: Do not auto-boot the SM7250 CDSP
+
+---
+ drivers/remoteproc/qcom_q6v5_pas.c | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/drivers/remoteproc/qcom_q6v5_pas.c b/drivers/remoteproc/qcom_q6v5_pas.c
+index a005546c2..db670618d 100644
+--- a/drivers/remoteproc/qcom_q6v5_pas.c
++++ b/drivers/remoteproc/qcom_q6v5_pas.c
+@@ -1213,6 +1213,22 @@ static const struct qcom_pas_data sm8250_cdsp_resource = {
+ 	.ssctl_id = 0x17,
+ };
+ 
++/* firmware lives on the rootfs: started by userspace (nord-modem) */
++static const struct qcom_pas_data sm7250_cdsp_resource = {
++	.crash_reason_smem = 601,
++	.firmware_name = "cdsp.mdt",
++	.pas_id = 18,
++	.auto_boot = false,
++	.proxy_pd_names = (char*[]){
++		"cx",
++		NULL
++	},
++	.load_state = "cdsp",
++	.ssr_name = "cdsp",
++	.sysmon_name = "cdsp",
++	.ssctl_id = 0x17,
++};
++
+ static const struct qcom_pas_data sc8280xp_nsp0_resource = {
+ 	.crash_reason_smem = 601,
+ 	.firmware_name = "cdsp.mdt",
+@@ -1884,6 +1900,9 @@ static const struct of_device_id qcom_pas_of_match[] = {
+ 	{ .compatible = "qcom,sm6375-adsp-pas", .data = &sm6350_adsp_resource },
+ 	{ .compatible = "qcom,sm6375-cdsp-pas", .data = &sm8150_cdsp_resource },
+ 	{ .compatible = "qcom,sm6375-mpss-pas", .data = &sm6375_mpss_resource },
++	{ .compatible = "qcom,sm7250-adsp-pas", .data = &sm6350_adsp_resource },
++	{ .compatible = "qcom,sm7250-cdsp-pas", .data = &sm7250_cdsp_resource },
++	{ .compatible = "qcom,sm7250-mpss-pas", .data = &mpss_resource_init },
+ 	{ .compatible = "qcom,sm8150-adsp-pas", .data = &sm8150_adsp_resource },
+ 	{ .compatible = "qcom,sm8150-cdsp-pas", .data = &sm8150_cdsp_resource },
+ 	{ .compatible = "qcom,sm8150-mpss-pas", .data = &mpss_resource_init },
