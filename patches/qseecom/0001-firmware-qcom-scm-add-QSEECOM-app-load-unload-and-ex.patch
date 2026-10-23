@@ -1,0 +1,167 @@
+From 04ae41e31a7ed29d6ae6b6debaf1dde05ae6c54e Mon Sep 17 00:00:00 2001
+From: lazybrar <211365301+lazybrar@users.noreply.github.com>
+Date: Fri, 23 Oct 2026 17:20:52 +0530
+Subject: [PATCH 1/3] firmware: qcom: scm: add QSEECOM app load/unload and
+ export version query
+
+Add qcom_scm_qseecom_app_load() and qcom_scm_qseecom_app_unload() so that
+a QSEE app image can be started and shut down through the QSEECOM SCM
+interface, and export qcom_scm_qseecom_get_version().
+
+These are the same SMC calls the downstream qseecom driver issues for
+QSEOS_APP_START_COMMAND and QSEOS_APP_SHUTDOWN_COMMAND on SoCs with the
+SMC-ID based interface.
+
+Signed-off-by: lazybrar <211365301+lazybrar@users.noreply.github.com>
+Co-Authored-By: Claude <noreply@anthropic.com>
+---
+ drivers/firmware/qcom/qcom_scm.c       | 74 +++++++++++++++++++++++++-
+ include/linux/firmware/qcom/qcom_scm.h | 20 +++++++
+ 2 files changed, 93 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/firmware/qcom/qcom_scm.c b/drivers/firmware/qcom/qcom_scm.c
+index 3eaa4c9ccf3c..85971853684d 100644
+--- a/drivers/firmware/qcom/qcom_scm.c
++++ b/drivers/firmware/qcom/qcom_scm.c
+@@ -116,6 +116,8 @@ enum qcom_scm_qseecom_tz_svc {
+ 
+ enum qcom_scm_qseecom_tz_cmd_app {
+ 	QSEECOM_TZ_CMD_APP_SEND			= 1,
++	QSEECOM_TZ_CMD_APP_START		= 1,
++	QSEECOM_TZ_CMD_APP_SHUTDOWN		= 2,
+ 	QSEECOM_TZ_CMD_APP_LOOKUP		= 3,
+ };
+ 
+@@ -2165,7 +2167,7 @@ static int qcom_scm_qseecom_call(const struct qcom_scm_desc *desc,
+  *
+  * Return: Zero on success, nonzero on failure.
+  */
+-static int qcom_scm_qseecom_get_version(u32 *version)
++int qcom_scm_qseecom_get_version(u32 *version)
+ {
+ 	struct qcom_scm_desc desc = {};
+ 	struct qcom_scm_qseecom_resp res = {};
+@@ -2185,6 +2187,7 @@ static int qcom_scm_qseecom_get_version(u32 *version)
+ 	*version = res.result;
+ 	return 0;
+ }
++EXPORT_SYMBOL_GPL(qcom_scm_qseecom_get_version);
+ 
+ /**
+  * qcom_scm_qseecom_app_get_id() - Query the app ID for a given QSEE app name.
+@@ -2295,6 +2298,75 @@ int qcom_scm_qseecom_app_send(u32 app_id, void *req, size_t req_size,
+ }
+ EXPORT_SYMBOL_GPL(qcom_scm_qseecom_app_send);
+ 
++/**
++ * qcom_scm_qseecom_app_load() - Load a QSEE app image into the TrustZone.
++ * @img:     Image buffer: ELF headers (@mdt_len bytes) followed by the
++ *           program segments, @img_len bytes in total (must be TZ memory).
++ * @mdt_len: Length of the header part of the image.
++ * @img_len: Total length of the image.
++ * @app_id:  The returned app ID.
++ *
++ * Asks the QSEE OS to authenticate and start the app contained in @img. The
++ * app is signed, the TrustZone refuses images it cannot verify.
++ *
++ * Return: Zero on success, nonzero on failure.
++ */
++int qcom_scm_qseecom_app_load(void *img, size_t mdt_len, size_t img_len,
++			      u32 *app_id)
++{
++	struct qcom_scm_qseecom_resp res = {};
++	struct qcom_scm_desc desc = {};
++	int status;
++
++	desc.owner = QSEECOM_TZ_OWNER_QSEE_OS;
++	desc.svc = QSEECOM_TZ_SVC_APP_MGR;
++	desc.cmd = QSEECOM_TZ_CMD_APP_START;
++	desc.arginfo = QCOM_SCM_ARGS(3, QCOM_SCM_VAL, QCOM_SCM_VAL, QCOM_SCM_VAL);
++	desc.args[0] = mdt_len;
++	desc.args[1] = img_len;
++	desc.args[2] = qcom_tzmem_to_phys(img);
++
++	status = qcom_scm_qseecom_call(&desc, &res);
++	if (status)
++		return status;
++
++	if (res.result != QSEECOM_RESULT_SUCCESS)
++		return -EIO;
++
++	if (res.resp_type != QSEECOM_SCM_RES_APP_ID)
++		return -EINVAL;
++
++	*app_id = res.data;
++	return 0;
++}
++EXPORT_SYMBOL_GPL(qcom_scm_qseecom_app_load);
++
++/**
++ * qcom_scm_qseecom_app_unload() - Shut down a QSEE app.
++ * @app_id: The ID of the app, as returned by qcom_scm_qseecom_app_load().
++ *
++ * Return: Zero on success, nonzero on failure.
++ */
++int qcom_scm_qseecom_app_unload(u32 app_id)
++{
++	struct qcom_scm_qseecom_resp res = {};
++	struct qcom_scm_desc desc = {};
++	int status;
++
++	desc.owner = QSEECOM_TZ_OWNER_QSEE_OS;
++	desc.svc = QSEECOM_TZ_SVC_APP_MGR;
++	desc.cmd = QSEECOM_TZ_CMD_APP_SHUTDOWN;
++	desc.arginfo = QCOM_SCM_ARGS(1, QCOM_SCM_VAL);
++	desc.args[0] = app_id;
++
++	status = qcom_scm_qseecom_call(&desc, &res);
++	if (status)
++		return status;
++
++	return res.result == QSEECOM_RESULT_SUCCESS ? 0 : -EIO;
++}
++EXPORT_SYMBOL_GPL(qcom_scm_qseecom_app_unload);
++
+ /*
+  * We do not yet support re-entrant calls via the qseecom interface. To prevent
+  + any potential issues with this, only allow validated machines for now.
+diff --git a/include/linux/firmware/qcom/qcom_scm.h b/include/linux/firmware/qcom/qcom_scm.h
+index 5747bd191bf1..55bdf5691290 100644
+--- a/include/linux/firmware/qcom/qcom_scm.h
++++ b/include/linux/firmware/qcom/qcom_scm.h
+@@ -169,12 +169,32 @@ int qcom_scm_shm_bridge_delete(u64 handle);
+ 
+ #ifdef CONFIG_QCOM_QSEECOM
+ 
++int qcom_scm_qseecom_get_version(u32 *version);
++int qcom_scm_qseecom_app_load(void *img, size_t mdt_len, size_t img_len,
++			      u32 *app_id);
++int qcom_scm_qseecom_app_unload(u32 app_id);
+ int qcom_scm_qseecom_app_get_id(const char *app_name, u32 *app_id);
+ int qcom_scm_qseecom_app_send(u32 app_id, void *req, size_t req_size,
+ 			      void *rsp, size_t rsp_size);
+ 
+ #else /* CONFIG_QCOM_QSEECOM */
+ 
++static inline int qcom_scm_qseecom_get_version(u32 *version)
++{
++	return -EINVAL;
++}
++
++static inline int qcom_scm_qseecom_app_load(void *img, size_t mdt_len,
++					    size_t img_len, u32 *app_id)
++{
++	return -EINVAL;
++}
++
++static inline int qcom_scm_qseecom_app_unload(u32 app_id)
++{
++	return -EINVAL;
++}
++
+ static inline int qcom_scm_qseecom_app_get_id(const char *app_name, u32 *app_id)
+ {
+ 	return -EINVAL;
+-- 
+2.56.0
+

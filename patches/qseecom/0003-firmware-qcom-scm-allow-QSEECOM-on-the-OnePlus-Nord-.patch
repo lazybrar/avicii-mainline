@@ -1,0 +1,32 @@
+From e61aa4517e9202d592ae5f0d39bf6ec64724ad0a Mon Sep 17 00:00:00 2001
+From: lazybrar <211365301+lazybrar@users.noreply.github.com>
+Date: Fri, 23 Oct 2026 17:20:52 +0530
+Subject: [PATCH 3/3] firmware: qcom: scm: allow QSEECOM on the OnePlus Nord
+ (avicii)
+
+The QSEECOM version query succeeds on the OnePlus Nord (SM7250), which
+reports version 0x1402000, but the interface is skipped as an untested
+machine. The app lookup and app send calls use the same SMC IDs as on the
+already allowed machines, so add it to the allowlist.
+
+Signed-off-by: lazybrar <211365301+lazybrar@users.noreply.github.com>
+Co-Authored-By: Claude <noreply@anthropic.com>
+---
+ drivers/firmware/qcom/qcom_scm.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/drivers/firmware/qcom/qcom_scm.c b/drivers/firmware/qcom/qcom_scm.c
+index 85971853684d..736f0ca5479d 100644
+--- a/drivers/firmware/qcom/qcom_scm.c
++++ b/drivers/firmware/qcom/qcom_scm.c
+@@ -2398,6 +2398,7 @@ static const struct of_device_id qcom_scm_qseecom_allowlist[] __maybe_unused = {
+ 	{ .compatible = "microsoft,denali", },
+ 	{ .compatible = "microsoft,romulus13", },
+ 	{ .compatible = "microsoft,romulus15", },
++	{ .compatible = "oneplus,avicii" },
+ 	{ .compatible = "qcom,glymur-crd" },
+ 	{ .compatible = "qcom,hamoa-iot-evk" },
+ 	{ .compatible = "qcom,mahua-crd" },
+-- 
+2.56.0
+

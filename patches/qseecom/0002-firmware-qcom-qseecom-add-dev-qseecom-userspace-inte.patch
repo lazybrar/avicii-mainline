@@ -1,0 +1,602 @@
+From b8a61ba3331f70924100e842fa2858ece8ebec37 Mon Sep 17 00:00:00 2001
+From: lazybrar <211365301+lazybrar@users.noreply.github.com>
+Date: Fri, 23 Oct 2026 17:20:52 +0530
+Subject: [PATCH 2/3] firmware: qcom: qseecom: add /dev/qseecom userspace
+ interface
+
+Add a misc character device that lets userspace load a trusted app, query
+whether an app is loaded, send commands to it and unload it. The ioctl
+numbers and structures match the downstream Android qseecom driver for
+this subset, so libQSEEComAPI and the Android HALs built on it can use it
+unchanged.
+
+Request and response data is copied through TZ memory (qcom_tzmem), which
+avoids the downstream ion shared buffer handling; the app image is read
+from a dma-buf. Listeners (TrustZone to Linux callbacks) are not
+supported yet, so apps that need them (RPMB, secure file system) do not
+work.
+
+Hidden behind CONFIG_QCOM_QSEECOM_DEV.
+
+Signed-off-by: lazybrar <211365301+lazybrar@users.noreply.github.com>
+Co-Authored-By: Claude <noreply@anthropic.com>
+---
+ drivers/firmware/qcom/Kconfig            |  14 +
+ drivers/firmware/qcom/Makefile           |   1 +
+ drivers/firmware/qcom/qcom_qseecom.c     |  34 ++-
+ drivers/firmware/qcom/qcom_qseecom_dev.c | 343 +++++++++++++++++++++++
+ include/uapi/linux/qseecom.h             | 107 +++++++
+ 5 files changed, 488 insertions(+), 11 deletions(-)
+ create mode 100644 drivers/firmware/qcom/qcom_qseecom_dev.c
+ create mode 100644 include/uapi/linux/qseecom.h
+
+diff --git a/drivers/firmware/qcom/Kconfig b/drivers/firmware/qcom/Kconfig
+index c7f8413ab996..585feba08d97 100644
+--- a/drivers/firmware/qcom/Kconfig
++++ b/drivers/firmware/qcom/Kconfig
+@@ -78,6 +78,20 @@ config QCOM_QSEECOM
+ 
+ 	  Select Y here to enable the QSEECOM interface driver.
+ 
++config QCOM_QSEECOM_DEV
++	bool "Qualcomm QSEECOM userspace interface (/dev/qseecom)"
++	depends on QCOM_QSEECOM
++	help
++	  Provides /dev/qseecom, which lets userspace load trusted apps into
++	  the Secure Execution Environment and send commands to them. The
++	  ioctl interface is compatible with the downstream Android kernels,
++	  so existing userspace (libQSEEComAPI, Android HALs) can use it.
++
++	  Listeners (TrustZone to Linux callbacks) are not supported yet.
++
++	  Select Y here if you need userspace access to the Secure Execution
++	  Environment, otherwise say N.
++
+ config QCOM_QSEECOM_UEFISECAPP
+ 	bool "Qualcomm SEE UEFI Secure App client driver"
+ 	depends on QCOM_QSEECOM
+diff --git a/drivers/firmware/qcom/Makefile b/drivers/firmware/qcom/Makefile
+index 88ce74d74c3e..3409dc186989 100644
+--- a/drivers/firmware/qcom/Makefile
++++ b/drivers/firmware/qcom/Makefile
+@@ -8,6 +8,7 @@ qcom-scm-objs += qcom_scm.o qcom_scm-smc.o qcom_scm-legacy.o
+ CFLAGS_qcom_scm-smc.o := -I$(src)
+ obj-$(CONFIG_QCOM_TZMEM)	+= qcom_tzmem.o
+ obj-$(CONFIG_QCOM_QSEECOM)	+= qcom_qseecom.o
++obj-$(CONFIG_QCOM_QSEECOM_DEV)	+= qcom_qseecom_dev.o
+ obj-$(CONFIG_QCOM_QSEECOM_UEFISECAPP) += qcom_qseecom_uefisecapp.o
+ obj-$(CONFIG_QCOM_PAS)		+= qcom_pas.o
+ obj-$(CONFIG_QCOM_PAS_TEE)	+= qcom_pas_tee.o
+diff --git a/drivers/firmware/qcom/qcom_qseecom.c b/drivers/firmware/qcom/qcom_qseecom.c
+index 320ec2a77524..cee4bc40c0ab 100644
+--- a/drivers/firmware/qcom/qcom_qseecom.c
++++ b/drivers/firmware/qcom/qcom_qseecom.c
+@@ -35,26 +35,18 @@ static void qseecom_client_remove(void *data)
+ 	auxiliary_device_uninit(&client->aux_dev);
+ }
+ 
+-static int qseecom_client_register(struct platform_device *qseecom_dev,
+-				   const struct qseecom_app_desc *desc)
++static int qseecom_client_add(struct platform_device *qseecom_dev,
++			      const char *dev_name, u32 app_id)
+ {
+ 	struct qseecom_client *client;
+-	u32 app_id;
+ 	int ret;
+ 
+-	/* Try to find the app ID, skip device if not found */
+-	ret = qcom_scm_qseecom_app_get_id(desc->app_name, &app_id);
+-	if (ret)
+-		return ret == -ENOENT ? 0 : ret;
+-
+-	dev_info(&qseecom_dev->dev, "setting up client for %s\n", desc->app_name);
+-
+ 	/* Allocate and set-up the client device */
+ 	client = kzalloc_obj(*client);
+ 	if (!client)
+ 		return -ENOMEM;
+ 
+-	client->aux_dev.name = desc->dev_name;
++	client->aux_dev.name = dev_name;
+ 	client->aux_dev.dev.parent = &qseecom_dev->dev;
+ 	client->aux_dev.dev.release = qseecom_client_release;
+ 	client->app_id = app_id;
+@@ -78,6 +70,22 @@ static int qseecom_client_register(struct platform_device *qseecom_dev,
+ 	return 0;
+ }
+ 
++static int qseecom_client_register(struct platform_device *qseecom_dev,
++				   const struct qseecom_app_desc *desc)
++{
++	u32 app_id;
++	int ret;
++
++	/* Try to find the app ID, skip device if not found */
++	ret = qcom_scm_qseecom_app_get_id(desc->app_name, &app_id);
++	if (ret)
++		return ret == -ENOENT ? 0 : ret;
++
++	dev_info(&qseecom_dev->dev, "setting up client for %s\n", desc->app_name);
++
++	return qseecom_client_add(qseecom_dev, desc->dev_name, app_id);
++}
++
+ /*
+  * List of supported applications. One client device will be created per entry,
+  * assuming the app has already been loaded (usually by firmware bootloaders)
+@@ -99,6 +107,10 @@ static int qcom_qseecom_probe(struct platform_device *qseecom_dev)
+ 			return ret;
+ 	}
+ 
++	/* Userspace access (/dev/qseecom), not tied to any particular app */
++	if (IS_ENABLED(CONFIG_QCOM_QSEECOM_DEV))
++		return qseecom_client_add(qseecom_dev, "qseecom_dev", 0);
++
+ 	return 0;
+ }
+ 
+diff --git a/drivers/firmware/qcom/qcom_qseecom_dev.c b/drivers/firmware/qcom/qcom_qseecom_dev.c
+new file mode 100644
+index 000000000000..4532b39b95f0
+--- /dev/null
++++ b/drivers/firmware/qcom/qcom_qseecom_dev.c
+@@ -0,0 +1,343 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * /dev/qseecom: userspace access to the Qualcomm Secure Execution
++ * Environment (QSEE) running in the TrustZone.
++ *
++ * Provides the subset of the downstream QSEECOM ioctl interface needed to
++ * load a trusted app, send commands to it and unload it. Request and
++ * response data is copied through TrustZone memory, so userspace does not
++ * need to hand over ion buffers for commands.
++ *
++ * Not supported yet: listeners (TrustZone to Linux callbacks), so apps
++ * that depend on them (for example RPMB or secure file system access) do
++ * not work.
++ */
++
++#include <linux/cleanup.h>
++#include <linux/dma-buf.h>
++#include <linux/err.h>
++#include <linux/firmware/qcom/qcom_qseecom.h>
++#include <linux/firmware/qcom/qcom_scm.h>
++#include <linux/firmware/qcom/qcom_tzmem.h>
++#include <linux/iosys-map.h>
++#include <linux/miscdevice.h>
++#include <linux/mutex.h>
++#include <linux/platform_device.h>
++#include <linux/sizes.h>
++#include <linux/slab.h>
++#include <linux/uaccess.h>
++
++#include <uapi/linux/qseecom.h>
++
++/* Upper bounds for user supplied lengths. */
++#define QSEECOM_DEV_MAX_IMG_SIZE	SZ_4M
++#define QSEECOM_DEV_MAX_CMD_SIZE	SZ_1M
++
++struct qseecom_dev {
++	struct miscdevice misc;
++	struct qcom_tzmem_pool *pool;
++};
++
++/**
++ * struct qseecom_dev_file - state of one open file
++ * @qdev:      Parent device.
++ * @lock:      Protects @app_id and @owns_app.
++ * @app_id:    App this file talks to, 0 if none.
++ * @owns_app:  Set if this file loaded the app and must shut it down.
++ */
++struct qseecom_dev_file {
++	struct qseecom_dev *qdev;
++	struct mutex lock;
++	u32 app_id;
++	bool owns_app;
++};
++
++static int qseecom_dev_open(struct inode *inode, struct file *file)
++{
++	struct miscdevice *misc = file->private_data;
++	struct qseecom_dev_file *qf;
++
++	qf = kzalloc_obj(*qf);
++	if (!qf)
++		return -ENOMEM;
++
++	qf->qdev = container_of(misc, struct qseecom_dev, misc);
++	mutex_init(&qf->lock);
++	file->private_data = qf;
++
++	return 0;
++}
++
++/* Must be called with qf->lock held. */
++static void qseecom_dev_drop_app(struct qseecom_dev_file *qf)
++{
++	if (qf->app_id && qf->owns_app)
++		qcom_scm_qseecom_app_unload(qf->app_id);
++
++	qf->app_id = 0;
++	qf->owns_app = false;
++}
++
++static int qseecom_dev_release(struct inode *inode, struct file *file)
++{
++	struct qseecom_dev_file *qf = file->private_data;
++
++	mutex_lock(&qf->lock);
++	qseecom_dev_drop_app(qf);
++	mutex_unlock(&qf->lock);
++
++	mutex_destroy(&qf->lock);
++	kfree(qf);
++
++	return 0;
++}
++
++static int qseecom_dev_get_version(void __user *argp)
++{
++	struct qseecom_qseos_version_req req;
++	int ret;
++
++	ret = qcom_scm_qseecom_get_version(&req.qseos_version);
++	if (ret)
++		return ret;
++
++	return copy_to_user(argp, &req, sizeof(req)) ? -EFAULT : 0;
++}
++
++static int qseecom_dev_app_query(struct qseecom_dev_file *qf, void __user *argp)
++{
++	struct qseecom_qseos_app_load_query req;
++	int ret;
++
++	if (copy_from_user(&req, argp, sizeof(req)))
++		return -EFAULT;
++
++	req.app_name[sizeof(req.app_name) - 1] = '\0';
++
++	guard(mutex)(&qf->lock);
++
++	ret = qcom_scm_qseecom_app_get_id(req.app_name, &req.app_id);
++	if (ret)
++		return ret;
++
++	/* Talk to an app that somebody else loaded, but never shut it down. */
++	qseecom_dev_drop_app(qf);
++	qf->app_id = req.app_id;
++
++	return copy_to_user(argp, &req, sizeof(req)) ? -EFAULT : 0;
++}
++
++/* Copy the image out of the dma-buf into TrustZone memory. */
++static int qseecom_dev_copy_img(void *dst, int fd, size_t len)
++{
++	struct iosys_map map;
++	struct dma_buf *dmabuf;
++	int ret;
++
++	dmabuf = dma_buf_get(fd);
++	if (IS_ERR(dmabuf))
++		return PTR_ERR(dmabuf);
++
++	if (dmabuf->size < len) {
++		ret = -EINVAL;
++		goto out_put;
++	}
++
++	ret = dma_buf_begin_cpu_access(dmabuf, DMA_FROM_DEVICE);
++	if (ret)
++		goto out_put;
++
++	ret = dma_buf_vmap_unlocked(dmabuf, &map);
++	if (ret)
++		goto out_end;
++
++	iosys_map_memcpy_from(dst, &map, 0, len);
++
++	dma_buf_vunmap_unlocked(dmabuf, &map);
++out_end:
++	dma_buf_end_cpu_access(dmabuf, DMA_FROM_DEVICE);
++out_put:
++	dma_buf_put(dmabuf);
++	return ret;
++}
++
++/* Load a new app from the image in the dma-buf @fd. */
++static int qseecom_dev_load_new(struct qseecom_dev *qdev, struct qseecom_load_img_req *req)
++{
++	void *img __free(qcom_tzmem) = qcom_tzmem_alloc(qdev->pool, req->img_len,
++							 GFP_KERNEL);
++	int ret;
++
++	if (!img)
++		return -ENOMEM;
++
++	ret = qseecom_dev_copy_img(img, req->ifd_data_fd, req->img_len);
++	if (ret)
++		return ret;
++
++	return qcom_scm_qseecom_app_load(img, req->mdt_len, req->img_len,
++					 &req->app_id);
++}
++
++static int qseecom_dev_load_app(struct qseecom_dev_file *qf, void __user *argp)
++{
++	struct qseecom_load_img_req req;
++	int ret;
++
++	if (copy_from_user(&req, argp, sizeof(req)))
++		return -EFAULT;
++
++	if (!req.img_len || req.img_len > QSEECOM_DEV_MAX_IMG_SIZE ||
++	    req.mdt_len > req.img_len)
++		return -EINVAL;
++
++	req.img_name[sizeof(req.img_name) - 1] = '\0';
++
++	guard(mutex)(&qf->lock);
++
++	if (qf->app_id)
++		return -EBUSY;
++
++	/* Like downstream: an already running app is shared, not loaded again. */
++	ret = qcom_scm_qseecom_app_get_id(req.img_name, &req.app_id);
++	if (ret == -ENOENT) {
++		ret = qseecom_dev_load_new(qf->qdev, &req);
++		qf->owns_app = !ret;
++	}
++	if (ret)
++		return ret;
++
++	qf->app_id = req.app_id;
++
++	return copy_to_user(argp, &req, sizeof(req)) ? -EFAULT : 0;
++}
++
++static int qseecom_dev_unload_app(struct qseecom_dev_file *qf)
++{
++	guard(mutex)(&qf->lock);
++
++	if (!qf->app_id)
++		return -EINVAL;
++
++	qseecom_dev_drop_app(qf);
++	return 0;
++}
++
++static int qseecom_dev_send_cmd(struct qseecom_dev_file *qf, void __user *argp)
++{
++	struct qseecom_send_cmd_req req;
++	int ret;
++
++	if (copy_from_user(&req, argp, sizeof(req)))
++		return -EFAULT;
++
++	if (!req.cmd_req_len || req.cmd_req_len > QSEECOM_DEV_MAX_CMD_SIZE ||
++	    !req.resp_len || req.resp_len > QSEECOM_DEV_MAX_CMD_SIZE)
++		return -EINVAL;
++
++	void *cmd __free(qcom_tzmem) = qcom_tzmem_alloc(qf->qdev->pool,
++							 req.cmd_req_len, GFP_KERNEL);
++	void *rsp __free(qcom_tzmem) = qcom_tzmem_alloc(qf->qdev->pool,
++							 req.resp_len, GFP_KERNEL);
++	if (!cmd || !rsp)
++		return -ENOMEM;
++
++	if (copy_from_user(cmd, req.cmd_req_buf, req.cmd_req_len))
++		return -EFAULT;
++
++	guard(mutex)(&qf->lock);
++
++	if (!qf->app_id)
++		return -EINVAL;
++
++	ret = qcom_scm_qseecom_app_send(qf->app_id, cmd, req.cmd_req_len,
++					rsp, req.resp_len);
++	if (ret)
++		return ret;
++
++	return copy_to_user(req.resp_buf, rsp, req.resp_len) ? -EFAULT : 0;
++}
++
++static long qseecom_dev_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
++{
++	struct qseecom_dev_file *qf = file->private_data;
++	void __user *argp = (void __user *)arg;
++
++	switch (cmd) {
++	case QSEECOM_IOCTL_GET_QSEOS_VERSION_REQ:
++		return qseecom_dev_get_version(argp);
++	case QSEECOM_IOCTL_APP_LOADED_QUERY_REQ:
++		return qseecom_dev_app_query(qf, argp);
++	case QSEECOM_IOCTL_LOAD_APP_REQ:
++		return qseecom_dev_load_app(qf, argp);
++	case QSEECOM_IOCTL_UNLOAD_APP_REQ:
++		return qseecom_dev_unload_app(qf);
++	case QSEECOM_IOCTL_SEND_CMD_REQ:
++		return qseecom_dev_send_cmd(qf, argp);
++	case QSEECOM_IOCTL_SET_MEM_PARAM_REQ:
++		/* Accepted for compatibility, see struct qseecom_set_sb_mem_param_req. */
++		return 0;
++	default:
++		return -ENOTTY;
++	}
++}
++
++static const struct file_operations qseecom_dev_fops = {
++	.owner = THIS_MODULE,
++	.open = qseecom_dev_open,
++	.release = qseecom_dev_release,
++	.unlocked_ioctl = qseecom_dev_ioctl,
++};
++
++static int qseecom_dev_probe(struct auxiliary_device *aux_dev,
++			     const struct auxiliary_device_id *id)
++{
++	struct qcom_tzmem_pool_config pool_config = {
++		.initial_size = SZ_64K,
++		.policy = QCOM_TZMEM_POLICY_MULTIPLIER,
++		.increment = 2,
++		.max_size = SZ_16M,
++	};
++	struct qseecom_dev *qdev;
++
++	qdev = devm_kzalloc(&aux_dev->dev, sizeof(*qdev), GFP_KERNEL);
++	if (!qdev)
++		return -ENOMEM;
++
++	qdev->pool = devm_qcom_tzmem_pool_new(&aux_dev->dev, &pool_config);
++	if (IS_ERR(qdev->pool))
++		return PTR_ERR(qdev->pool);
++
++	qdev->misc.minor = MISC_DYNAMIC_MINOR;
++	qdev->misc.name = "qseecom";
++	qdev->misc.fops = &qseecom_dev_fops;
++	qdev->misc.parent = &aux_dev->dev;
++	qdev->misc.mode = 0600;
++
++	auxiliary_set_drvdata(aux_dev, qdev);
++
++	return misc_register(&qdev->misc);
++}
++
++static void qseecom_dev_remove(struct auxiliary_device *aux_dev)
++{
++	struct qseecom_dev *qdev = auxiliary_get_drvdata(aux_dev);
++
++	misc_deregister(&qdev->misc);
++}
++
++static const struct auxiliary_device_id qseecom_dev_id_table[] = {
++	{ .name = "qcom_qseecom.qseecom_dev" },
++	{}
++};
++MODULE_DEVICE_TABLE(auxiliary, qseecom_dev_id_table);
++
++static struct auxiliary_driver qseecom_dev_driver = {
++	.probe = qseecom_dev_probe,
++	.remove = qseecom_dev_remove,
++	.id_table = qseecom_dev_id_table,
++};
++module_auxiliary_driver(qseecom_dev_driver);
++
++MODULE_DESCRIPTION("Qualcomm QSEECOM character device");
++MODULE_LICENSE("GPL");
+diff --git a/include/uapi/linux/qseecom.h b/include/uapi/linux/qseecom.h
+new file mode 100644
+index 000000000000..1f11c678d462
+--- /dev/null
++++ b/include/uapi/linux/qseecom.h
+@@ -0,0 +1,107 @@
++/* SPDX-License-Identifier: GPL-2.0-only WITH Linux-syscall-note */
++/*
++ * Userspace interface of the Qualcomm Secure Execution Environment
++ * (QSEECOM) character device.
++ *
++ * The request numbers and structure layouts match the downstream Android
++ * kernels, so that existing userspace (libQSEEComAPI and the Android
++ * keymaster/gatekeeper HALs built on it) works unchanged. Only the subset
++ * implemented by the mainline driver is defined here.
++ */
++
++#ifndef _UAPI_QSEECOM_H_
++#define _UAPI_QSEECOM_H_
++
++#include <linux/types.h>
++#include <linux/ioctl.h>
++
++#define QSEECOM_MAX_APP_NAME_SIZE	64
++
++/**
++ * struct qseecom_send_cmd_req - send a command to a loaded app
++ * @cmd_req_buf: request buffer, read by the app
++ * @cmd_req_len: length of the request buffer
++ * @resp_buf: response buffer, written by the app
++ * @resp_len: length of the response buffer
++ */
++struct qseecom_send_cmd_req {
++	void *cmd_req_buf;
++	unsigned int cmd_req_len;
++	void *resp_buf;
++	unsigned int resp_len;
++};
++
++/**
++ * struct qseecom_load_img_req - load an app image
++ * @mdt_len: length of the ELF header part of the image
++ * @img_len: total image length (headers followed by the segments)
++ * @ifd_data_fd: dma-buf file descriptor holding the image
++ * @img_name: name of the app
++ * @app_arch: unused
++ * @app_id: ID of the app (output)
++ */
++struct qseecom_load_img_req {
++	__u32 mdt_len;
++	__u32 img_len;
++	__s32 ifd_data_fd;
++	char img_name[QSEECOM_MAX_APP_NAME_SIZE];
++	__u32 app_arch;
++	__u32 app_id;
++};
++
++/**
++ * struct qseecom_set_sb_mem_param_req - shared buffer registration
++ * @ifd_data_fd: dma-buf file descriptor of the shared buffer
++ * @virt_sb_base: userspace address of the shared buffer
++ * @sb_len: length of the shared buffer
++ *
++ * Accepted for compatibility. The driver copies request and response data,
++ * so it does not need the shared buffer.
++ */
++struct qseecom_set_sb_mem_param_req {
++	__s32 ifd_data_fd;
++	void *virt_sb_base;
++	__u32 sb_len;
++};
++
++/**
++ * struct qseecom_qseos_version_req - query the QSEE OS version
++ * @qseos_version: version number (output)
++ */
++struct qseecom_qseos_version_req {
++	unsigned int qseos_version;
++};
++
++/**
++ * struct qseecom_qseos_app_load_query - check whether an app is loaded
++ * @app_name: name of the app
++ * @app_id: ID of the app (output)
++ * @app_arch: unused
++ */
++struct qseecom_qseos_app_load_query {
++	char app_name[QSEECOM_MAX_APP_NAME_SIZE];
++	__u32 app_id;
++	__u32 app_arch;
++};
++
++#define QSEECOM_IOC_MAGIC	0x97
++
++#define QSEECOM_IOCTL_SEND_CMD_REQ \
++	_IOWR(QSEECOM_IOC_MAGIC, 3, struct qseecom_send_cmd_req)
++
++#define QSEECOM_IOCTL_LOAD_APP_REQ \
++	_IOWR(QSEECOM_IOC_MAGIC, 7, struct qseecom_load_img_req)
++
++#define QSEECOM_IOCTL_SET_MEM_PARAM_REQ \
++	_IOWR(QSEECOM_IOC_MAGIC, 8, struct qseecom_set_sb_mem_param_req)
++
++#define QSEECOM_IOCTL_UNLOAD_APP_REQ \
++	_IO(QSEECOM_IOC_MAGIC, 9)
++
++#define QSEECOM_IOCTL_GET_QSEOS_VERSION_REQ \
++	_IOWR(QSEECOM_IOC_MAGIC, 10, struct qseecom_qseos_version_req)
++
++#define QSEECOM_IOCTL_APP_LOADED_QUERY_REQ \
++	_IOWR(QSEECOM_IOC_MAGIC, 15, struct qseecom_qseos_app_load_query)
++
++#endif /* _UAPI_QSEECOM_H_ */
+-- 
+2.56.0
+
