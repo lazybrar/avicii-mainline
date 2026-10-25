@@ -1,0 +1,95 @@
+diff --git a/drivers/firmware/qcom/qcom_scm.c b/drivers/firmware/qcom/qcom_scm.c
+index 3eaa4c9ccf3c..a31dbaa3fb4d 100644
+--- a/drivers/firmware/qcom/qcom_scm.c
++++ b/drivers/firmware/qcom/qcom_scm.c
+@@ -695,6 +695,17 @@ static int __qcom_scm_pas_init_image2(struct device *dev, u32 pas_id,
+ 	return ret ? : res.result[0];
+ }
+ 
++/* HACK: downstream pil-tz stages the metadata inside the PIL region itself */
++int qcom_scm_pas_init_image_phys(u32 pas_id, phys_addr_t mdata_phys)
++{
++	struct qcom_scm_res res;
++	int ret;
++
++	ret = __qcom_scm_pas_init_image(__scm->dev, pas_id, mdata_phys, &res);
++	return ret ? : res.result[0];
++}
++EXPORT_SYMBOL_GPL(qcom_scm_pas_init_image_phys);
++
+ int qcom_scm_pas_init_image(u32 pas_id, const void *metadata, size_t size,
+ 			    struct qcom_scm_pas_context *ctx)
+ {
+diff --git a/drivers/soc/qcom/mdt_loader.c b/drivers/soc/qcom/mdt_loader.c
+index db4c63281554..46dba9dc707d 100644
+--- a/drivers/soc/qcom/mdt_loader.c
++++ b/drivers/soc/qcom/mdt_loader.c
+@@ -15,6 +15,7 @@
+ #include <linux/kernel.h>
+ #include <linux/module.h>
+ #include <linux/firmware/qcom/qcom_pas.h>
++#include <linux/firmware/qcom/qcom_scm.h>
+ #include <linux/sizes.h>
+ #include <linux/slab.h>
+ #include <linux/soc/qcom/mdt_loader.h>
+@@ -281,8 +282,8 @@ static int __qcom_mdt_pas_init(struct device *dev, const struct firmware *fw,
+ 
+ 	ret = qcom_pas_init_image(pas_id, metadata, metadata_len, ctx);
+ 	dev_err(dev, "HACK pas: step=init_image ret=%d\n", ret);
+-	kfree(metadata);
+ 	if (ret) {
++		kfree(metadata);
+ 		/* Invalid firmware metadata */
+ 		dev_err(dev, "error %d initializing firmware %s\n", ret, fw_name);
+ 		goto out;
+@@ -293,10 +294,35 @@ static int __qcom_mdt_pas_init(struct device *dev, const struct firmware *fw,
+ 		dev_err(dev, "HACK pas: step=mem_setup(%pa,%#llx) ret=%d\n", &mem_phys,
+ 			(unsigned long long)(max_addr - min_addr), ret);
+ 		if (ret) {
+-			/* Unable to set up relocation */
+-			dev_err(dev, "error %d setting up firmware %s\n", ret, fw_name);
+-			goto out;
++			/* HACK probes: P1 plain retry; P2 metadata staged in region (downstream) */
++			int first = ret, pr;
++			bool ok;
++			void *rv;
++
++			pr = qcom_pas_mem_setup(pas_id, mem_phys, max_addr - min_addr);
++			dev_err(dev, "HACK pas: probe P1 retry mem_setup ret=%d\n", pr);
++			ok = !pr;
++			rv = memremap(mem_phys, metadata_len, MEMREMAP_WC);
++			if (rv) {
++				memcpy(rv, metadata, metadata_len);
++				memunmap(rv);
++				pr = qcom_scm_pas_init_image_phys(pas_id, mem_phys);
++				dev_err(dev, "HACK pas: probe P2 init_image_in_region ret=%d\n", pr);
++				pr = qcom_pas_mem_setup(pas_id, mem_phys, max_addr - min_addr);
++				dev_err(dev, "HACK pas: probe P2 mem_setup ret=%d\n", pr);
++				ok |= !pr;
++			}
++			ret = ok ? 0 : first;
++			if (ret) {
++				/* Unable to set up relocation */
++				dev_err(dev, "error %d setting up firmware %s\n", ret, fw_name);
++				kfree(metadata);
++				goto out;
++			}
+ 		}
++		kfree(metadata);
++	} else {
++		kfree(metadata);
+ 	}
+ 
+ out:
+diff --git a/include/linux/firmware/qcom/qcom_scm.h b/include/linux/firmware/qcom/qcom_scm.h
+index 5747bd191bf1..2ad6b5dc3750 100644
+--- a/include/linux/firmware/qcom/qcom_scm.h
++++ b/include/linux/firmware/qcom/qcom_scm.h
+@@ -81,6 +81,7 @@ struct qcom_scm_pas_context *devm_qcom_scm_pas_context_alloc(struct device *dev,
+ 							     u32 pas_id,
+ 							     phys_addr_t mem_phys,
+ 							     size_t mem_size);
++int qcom_scm_pas_init_image_phys(u32 pas_id, phys_addr_t mdata_phys);
+ int qcom_scm_pas_init_image(u32 pas_id, const void *metadata, size_t size,
+ 			    struct qcom_scm_pas_context *ctx);
+ void qcom_scm_pas_metadata_release(struct qcom_scm_pas_context *ctx);
